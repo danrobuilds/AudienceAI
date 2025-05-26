@@ -1,2 +1,2 @@
-# Audience_AI
+# AudienceAI
 AI Social Media Marketing Agent
