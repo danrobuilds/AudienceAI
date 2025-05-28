@@ -1,31 +1,37 @@
+import os
+import pandas as pd
 from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
-import os
-import pandas as pd
 
 
-df = pd.read_csv("../influencers_data_filtered.csv")
+# Determine the absolute path to the directory where vector.py is located
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# Assume influencers_data_filtered.csv is two levels up from the script's directory (e.g., project root)
+CSV_PATH = os.path.join(SCRIPT_DIR, "..", "influencers_data_filtered.csv")
+# Place the Chroma DB in a subdirectory relative to the script
+DB_LOCATION = os.path.join(SCRIPT_DIR, "local_embeddings_db")
+
+
+df = pd.read_csv(CSV_PATH)
 
 embeddings = OllamaEmbeddings(model="nomic-embed-text")
 
-db_location = "./local_embeddings_db"
-
 vector_store = Chroma(
     collection_name = "viral_post_data",
-    persist_directory=db_location,
+    persist_directory=DB_LOCATION,
     embedding_function=embeddings
 )
 
 # Check if database exists and has documents
-embeddings_db_exists = os.path.exists(db_location)
+embeddings_db_exists = os.path.exists(DB_LOCATION)
 collection_has_documents = False
 
 if embeddings_db_exists:
     try:
         temp_store = Chroma(
             collection_name="viral_post_data",
-            persist_directory=db_location,
+            persist_directory=DB_LOCATION,
             embedding_function=embeddings
         )
         collection_has_documents = temp_store._collection.count() > 0
@@ -124,9 +130,4 @@ retriever = vector_store.as_retriever(
 #     print("METADATA:")
 #     for key, value in doc.metadata.items():
 #         print(f"  {key}: {value}")
-#     print("="*80)
-
-
-
-
-
+#     print("="*80) 
