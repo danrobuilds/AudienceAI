@@ -2,6 +2,8 @@ from mcp.server.fastmcp import FastMCP
 from dotenv import load_dotenv
 from .vector import retriever as RetrieverTool
 from langchain_core.documents import Document
+from .news import get_news
+
 
 load_dotenv("../.env")
 
@@ -17,11 +19,41 @@ mcp = FastMCP(
 )
 
 
-# Add a simple calculator tool
+# Add a news search tool
 @mcp.tool()
-def add(a: int, b: int) -> int:
-    """Add two numbers together"""
-    return a + b
+def search_recent_news(query: str, sort_by: str = "publishedAt") -> str:
+    """Use NewsAPI to search for recent news articles based on a query."""
+    print(f"MCP Tool: Searching for recent news with query: '{query}', sort_by: '{sort_by}'")
+
+    news_data = get_news(query, sort_by)
+    
+    if news_data.get('status') != 'ok' or not news_data.get('articles'):
+        return "Could not retrieve news articles or no articles found."
+
+    articles = news_data.get('articles', [])
+    if not articles:
+        return "No news articles found for your query."
+
+    formatted_articles = []
+    for i, article in enumerate(articles[:5]): # Ensure we only process up to 5
+        title = article.get('title', 'N/A')
+        source_name = article.get('source', {}).get('name', 'N/A')
+        description = article.get('description', 'No description available.')
+        if not description: # Handle empty description string
+            description = "No description available."
+        url = article.get('url', 'N/A')
+        
+        formatted_article = (
+            f"Article {i+1}:\n"
+            f"  Title: {title}\n"
+            f"  Source: {source_name}\n"
+            f"  Description: {description}\n"
+            f"  URL: {url}"
+        )
+        formatted_articles.append(formatted_article)
+    
+    return "\n\n---\n\n".join(formatted_articles) if formatted_articles else "No news articles could be formatted."
+
 
 # Add the vector search tool
 @mcp.tool()
