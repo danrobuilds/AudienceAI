@@ -1,0 +1,10 @@
+langchain 
+langchain-ollama 
+langchain-chroma
+langchain-core
+langchain-community
+ollama
+pandas
+numpy
+scikit-learn
+requests
