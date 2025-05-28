@@ -1,3 +1,5 @@
+# Start by cd backend, then python3 -m mcpserver
+
 ## Part 3: Simple Server Setup with Python SDK
 
 ### Building Your First MCP Server

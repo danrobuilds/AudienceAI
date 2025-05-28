@@ -1,7 +1,0 @@
-mcp
-langchain-community
-langchain-core
-langchain-ollama
-langchain-chroma
-pandas
-python-dotenv 

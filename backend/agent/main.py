@@ -1,4 +1,4 @@
-from langchain_community.chat_models import ChatOllama
+from langchain_ollama import ChatOllama
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 # from langchain_core.tools import tool # No longer defining local tools
 # from langchain_core.documents import Document # Not directly used here anymore
@@ -7,8 +7,9 @@ import asyncio # For async operations
 # import os # No longer needed for path to server script
 
 # MCP Client imports from the 'mcp' package
-from mcp import ClientSession, SSEClientParameters, types # Changed to SSEClientParameters
-from mcp.client.sse import sse_client # Changed to sse_client
+from mcp import ClientSession
+from mcp.client.sse import sse_client
+import mcp.types # Import mcp.types directly
 
 # Define the tool for the LLM, which will now call the MCP server
 # The definition for the LLM needs to match the MCP tool's signature
@@ -30,7 +31,7 @@ search_linkedin_posts_mcp_tool_def = {
 async def main(): # Changed to async
     llm = ChatOllama(model="llama3.1:8b") 
     # Pass the MCP tool definition to the LLM
-    llm_with_tools = llm.bind_tools([search_linkedin_posts_mcp_tool_def], tool_choice=True) # Added tool_choice=True
+    llm_with_tools = llm.bind_tools([search_linkedin_posts_mcp_tool_def]) 
 
     user_prompt_text = input("prompt: ")
 
@@ -67,36 +68,47 @@ async def main(): # Changed to async
             if tool_call["name"] == "search_linkedin_posts":
                 print(f"Calling MCP tool 'search_linkedin_posts' with args: {tool_args} via SSE")
                 
-                # SSE Client Parameters - assumes server.py runs on localhost:8050 with /mcp path
-                # The port 8050 and path /mcp are common defaults but might need adjustment
-                # based on how server.py is run with mcp.run(transport="sse", ...)
-                server_params = SSEClientParameters(url="http://localhost:8050/mcp")
+                # Simplified SSE client connection using direct URL string
+                # Using /sse path as per the example provided by the user
+                server_url = "http://localhost:8050/sse" 
                 
                 tool_output = ""
                 try:
-                    # Using sse_client context manager
-                    async with sse_client(server_params) as (read_stream, write_stream, _): # sse_client returns a 3rd element
+                    # Using sse_client context manager, expecting two values (read_stream, write_stream)
+                    async with sse_client(server_url) as (read_stream, write_stream):
                         async with ClientSession(read_stream, write_stream) as session:
                             await session.initialize()
                             response = await session.call_tool(
                                 "search_linkedin_posts", 
                                 arguments=tool_args
                             )
-                            if response.type == types.ToolResultType.TOOL_RESULT:
-                                tool_output = response.content.text if response.content else ""
-                            elif response.type == types.ToolResultType.TOOL_ERROR:
-                                tool_output = f"Tool Error: {response.error.message if response.error else 'Unknown MCP tool error'}"
+                            # Check for error attribute on CallToolResult, then content
+                            if hasattr(response, 'error') and response.error:
+                                # Assuming response.error has a 'message' attribute or can be cast to string
+                                error_message = getattr(response.error, 'message', str(response.error))
+                                tool_output = f"Tool Error: {error_message}"
                                 print(f"MCP Tool Error: {tool_output}")
+                            elif hasattr(response, 'content') and response.content:
+                                # Assuming response.content has a 'text' attribute or can be cast to string
+                                # If content is a list, we might need to handle it differently (e.g., response.content[0].text)
+                                if isinstance(response.content, list) and len(response.content) > 0 and hasattr(response.content[0], 'text'):
+                                    tool_output = response.content[0].text
+                                elif hasattr(response.content, 'text'):
+                                    tool_output = response.content.text
+                                else:
+                                    tool_output = str(response.content) # Fallback to string representation
                             else:
-                                tool_output = f"Unknown MCP response type: {response.type}"
+                                tool_output = "Unknown MCP tool response structure or empty result."
                                 print(tool_output)
                             
                     print(f"MCP tool output: {tool_output}")
                 except ConnectionRefusedError:
-                    print(f"Error calling MCP tool: Connection refused. Is the MCP server running at {server_params.url}?")
-                    tool_output = f"Error: Could not connect to MCP server at {server_params.url}. Please ensure it is running with SSE transport."
+                    print(f"Error calling MCP tool: Connection refused. Is the MCP server running at {server_url}?")
+                    tool_output = f"Error: Could not connect to MCP server at {server_url}. Please ensure it is running with SSE transport."
                 except Exception as e:
-                    print(f"Error calling MCP tool: {e}")
+                    import traceback # Add for more detailed client-side error
+                    print(f"Error calling MCP tool (client-side full traceback): {e}")
+                    traceback.print_exc()
                     tool_output = f"Error executing tool via MCP (SSE): {str(e)}"
                 messages.append(ToolMessage(content=str(tool_output), tool_call_id=tool_call["id"]))
             else:
@@ -107,7 +119,7 @@ async def main(): # Changed to async
         print("\nGenerating LinkedIn post based on tool output and user prompt...")
         # The LLM needs to be invoked again with the tool results
         # Ensure the tool definition is still available if llm.bind_tools is used for subsequent calls
-        final_response_msg = await llm.bind_tools([search_linkedin_posts_mcp_tool_def]).ainvoke(messages) # Changed to ainvoke
+        final_response_msg = await llm.bind_tools([search_linkedin_posts_mcp_tool_def]).ainvoke(messages) 
         generated_content = final_response_msg.content
     else:
         print("\nLLM decided not to use a tool. Generating post directly...")

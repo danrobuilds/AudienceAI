@@ -5,11 +5,15 @@ from langchain_core.documents import Document
 
 load_dotenv("../.env")
 
+# These are the intended host and port for the SSE server
+SERVER_HOST = "0.0.0.0"
+SERVER_PORT = 8050
+
 # Create an MCP server
 mcp = FastMCP(
     name="AudienceAIServer",
-    host="0.0.0.0",  # only used for SSE transport (localhost)
-    port=8050,  # only used for SSE transport (set this to any port)
+    host=SERVER_HOST,  # Pass to FastMCP constructor
+    port=SERVER_PORT,  # Pass to FastMCP constructor
 )
 
 
@@ -48,16 +52,19 @@ def search_linkedin_posts(query: str) -> str:
         return f"Error retrieving viral posts: {str(e)}"
 
 
+def start_mcp_server():
+    """Initializes and runs the MCP server."""
+    transport = "sse"  # Default to SSE
+    # The host and port are defined in the FastMCP constructor and used by mcp.run()
+    
+    # Use the locally defined SERVER_HOST and SERVER_PORT for the print statement
+    print(f"Attempting to run server with {transport} transport on http://{SERVER_HOST}:{SERVER_PORT}/mcp (or /sse)")
+    # The mcp.run() method will use the host and port passed to the FastMCP constructor
+    mcp.run(transport=transport)
+
 # Run the server
 if __name__ == "__main__":
-    transport = "sse"  # Default to SSE
-    # The host and port are defined in the FastMCP constructor if using SSE
-    # mcp.run will use those.
-    # Default path for SSE with mcp package is typically /mcp or /sse.
-    # If you need a specific path, you might pass it to mcp.run, e.g., mcp.run(transport="sse", path="/custom_mcp")
-    
-    print(f"Running server with {transport} transport on http://{mcp.host}:{mcp.port}/mcp (or /sse)")
-    mcp.run(transport=transport)
+    start_mcp_server()
 
     # Older logic commented out for clarity:
     # if transport == "stdio":
