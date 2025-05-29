@@ -10,3 +10,4 @@ scikit-learn
 requests
 fastmcp
 newsapi-python
+pdfplumber

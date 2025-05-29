@@ -17,28 +17,34 @@ df = pd.read_csv(CSV_PATH)
 
 embeddings = OllamaEmbeddings(model="nomic-embed-text")
 
-vector_store = Chroma(
+# This Chroma instance is primarily for the initial data loading.
+# Querying will be handled by instances created directly in server.py tools.
+initial_vector_store_setup = Chroma(
     collection_name = "viral_post_data",
     persist_directory=DB_LOCATION,
     embedding_function=embeddings
 )
 
-# Check if database exists and has documents
+# Check if database exists and has documents for the viral_post_data collection
 embeddings_db_exists = os.path.exists(DB_LOCATION)
 collection_has_documents = False
 
 if embeddings_db_exists:
     try:
-        temp_store = Chroma(
-            collection_name="viral_post_data",
+        # Check count on the specific collection we are about to populate
+        temp_store_check = Chroma(
+            collection_name="viral_post_data", 
             persist_directory=DB_LOCATION,
             embedding_function=embeddings
         )
-        collection_has_documents = temp_store._collection.count() > 0
-    except:
-        collection_has_documents = False
+        collection_has_documents = temp_store_check._collection.count() > 0
+    except Exception as e:
+        print(f"Could not check document count for viral_post_data: {e}")
+        collection_has_documents = False # Assume not populated if check fails
 
 if not embeddings_db_exists or not collection_has_documents:
+    print(f"Database at '{DB_LOCATION}' for collection 'viral_post_data' does not exist or is empty.")
+    print("Proceeding with initial data population from CSV...")
     documents = []
     ids = []
 
@@ -104,13 +110,31 @@ if not embeddings_db_exists or not collection_has_documents:
         
         print(f"Processing batch {i//batch_size + 1}/{(total_docs + batch_size - 1)//batch_size} ({i+1}-{min(i+batch_size, total_docs)}/{total_docs})")
         
-        vector_store.add_documents(documents=batch_docs, ids=batch_ids)
+        initial_vector_store_setup.add_documents(documents=batch_docs, ids=batch_ids)
     
-    print(f"Successfully added all {len(documents)} documents to vector store")
+    print(f"Successfully added all {len(documents)} documents to vector store for 'viral_post_data'")
 
-retriever = vector_store.as_retriever(
-    search_kwargs={"k": 10}
-)
+
+
+
+# Retrievers are no longer defined here; they are created on-demand in server.py tools.
+# retriever = vector_store.as_retriever(
+#     search_kwargs={"k": 10}
+# )
+
+# # --- Retriever for PDF Text Content ---
+# # Use the same embedding function and DB location, but a different collection name
+# pdf_collection_name = "pdf_text_content"
+# 
+# pdf_vector_store = Chroma(
+#     collection_name=pdf_collection_name,
+#     persist_directory=DB_LOCATION,
+#     embedding_function=embeddings
+# )
+# 
+# pdf_content_retriever = pdf_vector_store.as_retriever(
+#     search_kwargs={"k": 5} # Retrieve top 5 relevant PDF chunks
+# )
 
 
 # input_prompt = input("prompt: ")

@@ -20,7 +20,7 @@ def get_news(query, sort_by):
                                         to=to_date,
                                         language='en',
                                         sort_by=sort_by,
-                                        page_size=5,
+                                        page_size=10,
                                         page=1)
     
     return all_articles
@@ -28,7 +28,7 @@ def get_news(query, sort_by):
 
 
 # if __name__ == "__main__":
-#     print(get_news("AI", "publishedAt"))
+#     print(get_news("AI OR loan OR lending OR asset based lending OR asset based lending software", "publishedAt"))
 
 
 

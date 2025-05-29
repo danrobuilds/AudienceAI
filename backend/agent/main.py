@@ -13,6 +13,21 @@ import mcp.types # Import mcp.types directly
 
 # Define the tool for the LLM, which will now call the MCP server
 # The definition for the LLM needs to match the MCP tool's signature
+search_document_library_mcp_tool_def = {
+    "name": "search_document_library",
+    "description": "Search the internal PDF document library on company information using an embedding-based retriever. Use this to find relevant information for the user's prompt.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "The topic or theme to search for in company information documents."
+            }
+        },
+        "required": ["query"]
+    }
+}
+
 search_linkedin_posts_mcp_tool_def = {
     "name": "search_linkedin_posts",
     "description": "Search for viral LinkedIn posts using an embedding-based retriever. Use this to find examples of successful posts on a given topic.",
@@ -21,7 +36,7 @@ search_linkedin_posts_mcp_tool_def = {
         "properties": {
             "query": {
                 "type": "string",
-                "description": "The topic or theme to search for in viral posts."
+                "description": "The topic or theme to search for in viral post structures."
             }
         },
         "required": ["query"]
@@ -37,13 +52,9 @@ search_recent_news_mcp_tool_def = {
             "query": {
                 "type": "string",
                 "description": (
-                    "The topic or theme to search for in recent news articles. "
-                    "Can be keywords or phrases to search for in the article title and body. "
-                    "Surround phrases with quotes for exact match. "
-                    "Prepend words or phrases that must appear with a + symbol. Eg: +bitcoin "
-                    "Prepend words that must not appear with a - symbol. Eg: -bitcoin "
-                    "Alternatively you can use the AND / OR / NOT keywords, and optionally group "
-                    "these with parenthesis. Eg: crypto AND (ethereum OR litecoin) NOT bitcoin. "
+                    "Pick several keywords to search for in the article title and body. "
+                    "Separate each single word with the OR operator. "
+                    "Only use common words and OR operator. Do not use over complicated queries because they will not return any results."
                     "The complete value for q must be URL-encoded. Max length: 500 chars."
                 )
             },
@@ -59,18 +70,19 @@ search_recent_news_mcp_tool_def = {
 async def main(): # Changed to async
     llm = ChatOllama(model="llama3.1:8b") 
     # Pass the MCP tool definitions to the LLM
-    llm_with_tools = llm.bind_tools([search_linkedin_posts_mcp_tool_def, search_recent_news_mcp_tool_def]) 
+    llm_with_tools = llm.bind_tools([search_linkedin_posts_mcp_tool_def, search_recent_news_mcp_tool_def, search_document_library_mcp_tool_def]) 
 
     user_prompt_text = input("prompt: ")
 
     system_message_content = """You are a social media marketing employee. Your task is to write a single LinkedIn post for the user.
 
                             IMPORTANT INSTRUCTIONS:
-                            1. First, determine whether to use the 'search_linkedin_posts' tool to find viral post examples related to the user's query.
-                            2. Second, determine based on the user's query if you need to use the 'search_recent_news' tool to gather current information or news relevant to the user's topic. This tool is remotely hosted.
-                            3. Then, write a LinkedIn post that draws inspiration from viral examples (if found) and incorporates relevant news (if found).
-                            4. Include a brief one-sentence guideline for media at the end of the post.
-                            5. Do not provide guidelines or explanations beyond the post itself - write the post.
+                            1. Use the 'search_document_library' tool to find relevant contextual information from the company's internal documents.
+                            2. Determine whether to use the 'search_linkedin_posts' tool to find viral post examples related to the user's query.
+                            3. Determine based on the user's query if you need to use the 'search_recent_news' tool to gather current information or news relevant to the user's topic. This tool is remotely hosted.
+                            4. Then, write a LinkedIn post that draws inspiration from viral examples (if found) and incorporates relevant news (if found).
+                            5. Include a brief one-sentence guideline for media at the end of the post.
+                            6. Do not provide guidelines or explanations beyond the post itself - write the post.
 
                             Company information to draw from if necessary given the user's query: 
                                 - ABLSoft is a software company providing asset based lending solutions. 
@@ -80,7 +92,7 @@ async def main(): # Changed to async
                                 - Intelligent Processing Onboard any deal (AR, inventory, term) and customize as needed (sublimits, ineligibles, lockbox). Instantly calculate availability and streamline advance approvals.
                                 - Seamless Insights. Get immediate visibility with real-time dashboards and 30+ standard reports. Design your own reports in minutes to track borrower performance and compliance.
                                 
-                                
+
                             Follow this process:
                             1. Based on the user's prompt, decide if you need to search for viral posts and/or recent news. If so, call the appropriate tool(s) with relevant queries.
                             2. Analyze the format and style of any successful posts and the content of any news articles returned by the tool(s).
@@ -91,7 +103,7 @@ async def main(): # Changed to async
         HumanMessage(content=user_prompt_text),
     ]
 
-    print("\nAnalyzing user prompt and potentially searching for viral posts via MCP (SSE)...")
+    print("\nAnalyzing user prompt and potentially using tools via MCP (SSE)...")
 
     ai_msg = await llm_with_tools.ainvoke(messages) 
     messages.append(ai_msg)
@@ -105,6 +117,44 @@ async def main(): # Changed to async
             server_url = "http://localhost:8050/sse" 
             tool_output = ""
             
+            # MCP tool for company information
+            if tool_call["name"] == "search_document_library":
+                print(f"Calling MCP tool 'search_document_library' with args: {tool_args} via SSE")
+                
+                try:
+                    async with sse_client(server_url) as (read_stream, write_stream):
+                        async with ClientSession(read_stream, write_stream) as session:
+                            await session.initialize()
+                            response = await session.call_tool(
+                                "search_document_library", 
+                                arguments=tool_args
+                            )
+                            if hasattr(response, 'error') and response.error:
+                                error_message = getattr(response.error, 'message', str(response.error))
+                                tool_output = f"Tool Error: {error_message}"
+                                print(f"MCP Tool Error: {tool_output}")
+                            elif hasattr(response, 'content') and response.content:
+                                if isinstance(response.content, list) and len(response.content) > 0 and hasattr(response.content[0], 'text'):
+                                    tool_output = response.content[0].text
+                                elif hasattr(response.content, 'text'):
+                                    tool_output = response.content.text
+                                else:
+                                    tool_output = str(response.content) 
+                            else:
+                                tool_output = "Unknown MCP tool response structure or empty result."
+                                print(tool_output)
+                            
+                    print(f"MCP tool output: {tool_output}")
+                except ConnectionRefusedError:
+                    print(f"Error calling MCP tool: Connection refused. Is the MCP server running at {server_url}?")
+                    tool_output = f"Error: Could not connect to MCP server at {server_url}. Please ensure it is running with SSE transport."
+                except Exception as e:
+                    import traceback # Add for more detailed client-side error
+                    print(f"Error calling MCP tool (client-side full traceback): {e}")
+                    traceback.print_exc()
+                    tool_output = f"Error executing tool via MCP (SSE): {str(e)}"
+                messages.append(ToolMessage(content=str(tool_output), tool_call_id=tool_call["id"]))
+
             # MCP tool for viral posts
             if tool_call["name"] == "search_linkedin_posts":
                 print(f"Calling MCP tool 'search_linkedin_posts' with args: {tool_args} via SSE")
@@ -190,7 +240,7 @@ async def main(): # Changed to async
         print("\nGenerating LinkedIn post based on tool output and user prompt...")
         # The LLM needs to be invoked again with the tool results
         # Ensure all tool definitions are available if llm.bind_tools is used for subsequent calls
-        final_response_msg = await llm.bind_tools([search_linkedin_posts_mcp_tool_def, search_recent_news_mcp_tool_def]).ainvoke(messages) 
+        final_response_msg = await llm.bind_tools([search_document_library_mcp_tool_def, search_linkedin_posts_mcp_tool_def, search_recent_news_mcp_tool_def]).ainvoke(messages) 
         generated_content = final_response_msg.content
     else:
         print("\nLLM decided not to use a tool. Generating post directly...")
