@@ -44,8 +44,15 @@ def search_recent_news(query: str, sort_by: str = "publishedAt") -> str:
 
     news_data = get_news(query, sort_by)
     
-    if news_data.get('status') != 'ok' or not news_data.get('articles'):
-        return "Could not retrieve news articles or no articles found."
+    # Updated error handling based on the new structure from get_news()
+    if not isinstance(news_data, dict) or news_data.get('status') != 'ok':
+        error_message = "Could not retrieve news articles or an API error occurred."
+        if isinstance(news_data, dict) and news_data.get('message'):
+            error_message = f"NewsAPI Error: {news_data['message']}" # Use the message from get_news
+        elif not isinstance(news_data, dict):
+            error_message = f"NewsAPI Error: Unexpected response type from get_news: {type(news_data)}"
+        print(f"MCP Tool search_recent_news error: {error_message}")
+        return error_message
 
     articles = news_data.get('articles', [])
     if not articles:
@@ -53,16 +60,22 @@ def search_recent_news(query: str, sort_by: str = "publishedAt") -> str:
 
     formatted_articles = []
     for i, article in enumerate(articles[:5]): # Ensure we only process up to 5
-        title = article.get('title', 'N/A')
-        source_name = article.get('source', {}).get('name', 'N/A')
-        description = article.get('description', 'No description available.')
-        if not description: # Handle empty description string
-            description = "No description available."
-        content = article.get('content', 'No content available.')
-        if not content: # Handle empty content string
-            content = "No content available."
-        url = article.get('url', 'N/A')
+        title = str(article.get('title', 'N/A'))
+        source_name = str(article.get('source', {}).get('name', 'N/A'))
         
+        description = article.get('description')
+        if not description: # Handles None and empty string
+            description = "No description available."
+        else:
+            description = str(description)
+
+        content = article.get('content')
+        if not content: # Handles None and empty string
+            content = "No content available."
+        else:
+            content = str(content)
+            
+        url = str(article.get('url', 'N/A'))
         
         formatted_article = (
             f"Article {i+1}:\n"
