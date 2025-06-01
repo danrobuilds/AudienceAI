@@ -69,16 +69,33 @@ search_recent_news_mcp_tool_def = {
 
 # Renamed and refactored main function
 async def generate_post_for_prompt(user_prompt_text: str, async_log_callback: callable = None):
+    print(f"[MAIN.PY DEBUG] generate_post_for_prompt called with prompt: {user_prompt_text}")
+    print(f"[MAIN.PY DEBUG] async_log_callback provided: {async_log_callback is not None}")
+    
     # logs = [] # No longer collecting logs here, will use callback
     async def _log(message):
+        print(f"[MAIN.PY DEBUG] _log called with message: {message}")
         if async_log_callback:
+            print(f"[MAIN.PY DEBUG] Calling async_log_callback with: {message}")
             await async_log_callback(message)
         # else:
             # Optionally print to console if no callback is provided (for backend debugging)
             # print(message)
 
-    llm = ChatOllama(model="llama3.1:8b") 
-    llm_with_tools = llm.bind_tools([search_linkedin_posts_mcp_tool_def, search_recent_news_mcp_tool_def, search_document_library_mcp_tool_def]) 
+    print(f"[MAIN.PY DEBUG] Creating ChatOllama with model: qwen3:14b")
+    try:
+        llm = ChatOllama(model="llama3.1:8b", request_timeout=120.0) 
+        print(f"[MAIN.PY DEBUG] ChatOllama created successfully")
+    except Exception as llm_error:
+        print(f"[MAIN.PY ERROR] Failed to create ChatOllama: {llm_error}")
+        raise llm_error
+        
+    try:
+        llm_with_tools = llm.bind_tools([search_linkedin_posts_mcp_tool_def, search_recent_news_mcp_tool_def, search_document_library_mcp_tool_def]) 
+        print(f"[MAIN.PY DEBUG] Tools bound successfully")
+    except Exception as tools_error:
+        print(f"[MAIN.PY ERROR] Failed to bind tools: {tools_error}")
+        raise tools_error
 
     # user_prompt_text = input("prompt: ") # Removed input
 
@@ -108,9 +125,19 @@ async def generate_post_for_prompt(user_prompt_text: str, async_log_callback: ca
         HumanMessage(content=user_prompt_text),
     ]
 
+    print(f"[MAIN.PY DEBUG] About to call _log with initial message")
     await _log("\nAnalyzing user prompt and potentially using tools via MCP (SSE)...")
 
-    ai_msg = await llm_with_tools.ainvoke(messages) 
+    print(f"[MAIN.PY DEBUG] About to call llm_with_tools.ainvoke")
+    try:
+        ai_msg = await llm_with_tools.ainvoke(messages) 
+        print(f"[MAIN.PY DEBUG] llm_with_tools.ainvoke completed successfully")
+        print(f"[MAIN.PY DEBUG] ai_msg type: {type(ai_msg)}")
+        print(f"[MAIN.PY DEBUG] ai_msg.tool_calls: {getattr(ai_msg, 'tool_calls', 'No tool_calls attribute')}")
+    except Exception as invoke_error:
+        print(f"[MAIN.PY ERROR] llm_with_tools.ainvoke failed: {invoke_error}")
+        raise invoke_error
+        
     messages.append(ai_msg)
 
     if ai_msg.tool_calls:
