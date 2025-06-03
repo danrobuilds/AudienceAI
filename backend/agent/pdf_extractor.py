@@ -6,7 +6,6 @@ from langchain_chroma import Chroma
 from langchain_core.documents import Document
 
 # --- Constants ---
-# This script is in backend/agent/, so DB is in ../mcpserver/local_embeddings_db/
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(SCRIPT_DIR, "..", "mcpserver", "local_embeddings_db")
 PDF_COLLECTION_NAME = "pdf_text_content"
@@ -57,7 +56,7 @@ def _extract_text_from_pdf_bytes(pdf_bytes: bytes) -> tuple[str | None, str | No
             for page in pdf.pages:
                 page_text = page.extract_text()
                 if page_text:
-                    text += page_text + "\n"  # Add a newline character after each page's text
+                    text += page_text + "\n"  
             return (text.strip(), None) if text else (None, "No text found in PDF.")
     except Exception as e:
         return None, f"Error extracting text from PDF bytes: {e}"
@@ -78,7 +77,7 @@ def process_and_add_pdf(pdf_bytes: bytes, original_filename: str) -> tuple[bool,
         name_part = name_part[:-4]
     
     sanitized_name_part = "".join(c if c.isalnum() or c in ['_'] else '_' for c in name_part)
-    sanitized_name_part = '_'.join(filter(None, sanitized_name_part.split('_'))) # Remove multiple underscores
+    sanitized_name_part = '_'.join(filter(None, sanitized_name_part.split('_'))) 
 
     doc_id = f"pdf_{sanitized_name_part}"
 
@@ -107,10 +106,7 @@ def process_and_add_pdf(pdf_bytes: bytes, original_filename: str) -> tuple[bool,
         print(f"[pdf_extractor DEBUG] Adding document ID '{doc_id}' to vector store.")
         vector_store.add_documents(documents=[doc], ids=[doc_id])
         print(f"[pdf_extractor INFO] Document ID '{doc_id}' added successfully.")
-        # Chroma with persist_directory usually auto-persists.
-        # If issues arise, uncomment:
-        # vector_store.persist() 
-        # print(f"[pdf_extractor DEBUG] vector_store.persist() called for ID '{doc_id}'.")
+    
         return True, f"File '{original_filename}' processed and added to database with ID '{doc_id}'."
     except Exception as e:
         print(f"[pdf_extractor ERROR] Error adding document ID '{doc_id}': {e}")
@@ -142,8 +138,7 @@ def extract_text_from_pdf(pdf_path):
     except Exception as e:
         return f"Error extracting text: {e}"
 
-# The original __main__ block is commented out to avoid conflicts with Streamlit usage.
-# It would need to be updated to use the new _initialize functions and constants.
+
 """
 if __name__ == '__main__':
     # Define the directory for PDFs, relative to this script file

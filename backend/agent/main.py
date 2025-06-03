@@ -1,18 +1,12 @@
 from langchain_ollama import ChatOllama
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
-# from langchain_core.tools import tool # No longer defining local tools
-# from langchain_core.documents import Document # Not directly used here anymore
 import json
-import asyncio # For async operations
-# import os # No longer needed for path to server script
-
-# MCP Client imports from the 'mcp' package
+import asyncio 
 from mcp import ClientSession
 from mcp.client.sse import sse_client
-import mcp.types # Import mcp.types directly
+import mcp.types 
 
-# Define the tool for the LLM, which will now call the MCP server
-# The definition for the LLM needs to match the MCP tool's signature
+# MCP Tool Definitions
 search_document_library_mcp_tool_def = {
     "name": "search_document_library",
     "description": "Search the internal PDF document library on company information using an embedding-based retriever. Use this to find relevant information for the user's prompt about ABLSoft or related topics.",
@@ -67,34 +61,26 @@ search_recent_news_mcp_tool_def = {
     }
 }
 
-# Renamed and refactored main function
 async def generate_post_for_prompt(user_prompt_text: str, async_log_callback: callable = None):
-    print(f"[MAIN.PY DEBUG] generate_post_for_prompt called with prompt: {user_prompt_text}")
-    print(f"[MAIN.PY DEBUG] async_log_callback provided: {async_log_callback is not None}")
     
-    # logs = [] # No longer collecting logs here, will use callback
     async def _log(message):
-        print(f"[MAIN.PY DEBUG] _log called with message: {message}")
+        
         if async_log_callback:
-            print(f"[MAIN.PY DEBUG] Calling async_log_callback with: {message}")
+            
             await async_log_callback(message)
-        # else:
-            # Optionally print to console if no callback is provided (for backend debugging)
-            # print(message)
 
-    print(f"[MAIN.PY DEBUG] Creating ChatOllama with model: qwen3:14b")
     try:
         llm = ChatOllama(model="llama3.1:8b", request_timeout=120.0) 
-        print(f"[MAIN.PY DEBUG] ChatOllama created successfully")
+        print(f"ChatOllama created successfully")
     except Exception as llm_error:
-        print(f"[MAIN.PY ERROR] Failed to create ChatOllama: {llm_error}")
+        print(f"Failed to create ChatOllama: {llm_error}")
         raise llm_error
         
     try:
         llm_with_tools = llm.bind_tools([search_linkedin_posts_mcp_tool_def, search_recent_news_mcp_tool_def, search_document_library_mcp_tool_def]) 
-        print(f"[MAIN.PY DEBUG] Tools bound successfully")
+        
     except Exception as tools_error:
-        print(f"[MAIN.PY ERROR] Failed to bind tools: {tools_error}")
+        print(f"Failed to bind tools: {tools_error}")
         raise tools_error
 
     # user_prompt_text = input("prompt: ") # Removed input
@@ -125,15 +111,10 @@ async def generate_post_for_prompt(user_prompt_text: str, async_log_callback: ca
         HumanMessage(content=user_prompt_text),
     ]
 
-    print(f"[MAIN.PY DEBUG] About to call _log with initial message")
     await _log("\nAnalyzing user prompt and potentially using tools via MCP (SSE)...")
 
-    print(f"[MAIN.PY DEBUG] About to call llm_with_tools.ainvoke")
     try:
         ai_msg = await llm_with_tools.ainvoke(messages) 
-        print(f"[MAIN.PY DEBUG] llm_with_tools.ainvoke completed successfully")
-        print(f"[MAIN.PY DEBUG] ai_msg type: {type(ai_msg)}")
-        print(f"[MAIN.PY DEBUG] ai_msg.tool_calls: {getattr(ai_msg, 'tool_calls', 'No tool_calls attribute')}")
     except Exception as invoke_error:
         print(f"[MAIN.PY ERROR] llm_with_tools.ainvoke failed: {invoke_error}")
         raise invoke_error
@@ -145,7 +126,7 @@ async def generate_post_for_prompt(user_prompt_text: str, async_log_callback: ca
         for tool_call in ai_msg.tool_calls:
             tool_args = tool_call["args"]
             server_url = "http://localhost:8050/sse" 
-            tool_output_content = "" # Initialize to empty string
+            tool_output_content = "" 
             
             tool_name = tool_call["name"]
             await _log(f"Calling MCP tool '{tool_name}' with args: {tool_args} via SSE")
@@ -189,17 +170,16 @@ async def generate_post_for_prompt(user_prompt_text: str, async_log_callback: ca
                 import traceback 
                 log_msg = f"Error during MCP tool '{tool_name}' call (client-side full traceback): {e}"
                 await _log(log_msg)
-                # await _log(traceback.format_exc()) # Optionally add full traceback to logs
                 tool_output_content = f"The '{tool_name}' tool failed to execute or return valid data due to a client-side or communication error: {str(e)}. Please proceed based on other available information and the user's original request."
             
-            # Ensure tool_output_content is always a string before appending to ToolMessage
             if not isinstance(tool_output_content, str):
                 tool_output_content = str(tool_output_content) if tool_output_content is not None else f"Tool '{tool_name}' resulted in a non-string output which has been converted."
 
             messages.append(ToolMessage(content=tool_output_content, tool_call_id=tool_call["id"]))
         
         await _log("\nGenerating LinkedIn post based on tool output and user prompt...")
-        # Bind tools again for the final response generation, in case LLM needs to re-evaluate or summarize.
+        
+        # Bind tools again for the final response generation
         final_response_msg = await llm.bind_tools([search_document_library_mcp_tool_def, search_linkedin_posts_mcp_tool_def, search_recent_news_mcp_tool_def]).ainvoke(messages) 
         generated_content_final = final_response_msg.content
     else:
@@ -208,5 +188,4 @@ async def generate_post_for_prompt(user_prompt_text: str, async_log_callback: ca
 
     return generated_content_final
 
-# Removed: if __name__ == "__main__":
-# Removed:     asyncio.run(main())
+

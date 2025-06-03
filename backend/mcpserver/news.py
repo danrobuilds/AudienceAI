@@ -4,7 +4,6 @@ from dotenv import load_dotenv
 from datetime import datetime, timedelta
 
 # Load .env
-# Attempt to load the .env file from the parent directory of the current script
 dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
 loaded_correctly = load_dotenv(dotenv_path=dotenv_path, verbose=True)
 
@@ -12,7 +11,6 @@ print(f"[news.py DEBUG] dotenv_path being checked: {dotenv_path}")
 print(f"[news.py DEBUG] load_dotenv reported successful load: {loaded_correctly}")
 
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
-# Avoid printing the key itself. Just confirm if it was loaded.
 key_is_loaded = NEWS_API_KEY is not None and NEWS_API_KEY != ""
 print(f"[news.py DEBUG] NEWS_API_KEY is loaded: {key_is_loaded}")
 
@@ -59,7 +57,7 @@ def get_news(query, sort_by):
         return all_articles
     except Exception as e:
         print(f"Error during NewsAPI call in get_news: {e}")
-        # Return an error structure similar to what NewsAPI might send or a custom one
+        # Return an error structure 
         return {
             'status': 'error',
             'code': 'apiCallError',

@@ -1,3 +1,5 @@
+# Start with cd backend, then python3 -m mcpserver
+
 from .server import start_mcp_server
 
 if __name__ == "__main__":
