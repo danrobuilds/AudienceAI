@@ -1,15 +1,23 @@
 from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
+from openai import OpenAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 import json
 import asyncio 
 from mcp import ClientSession
 from mcp.client.sse import sse_client
 import mcp.types 
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
+load_dotenv(dotenv_path)
 
 # MCP Tool Definitions
 search_document_library_mcp_tool_def = {
     "name": "search_document_library",
-    "description": "Search the internal PDF document library on company information using an embedding-based retriever. Use this to find relevant information for the user's prompt about ABLSoft or related topics.",
+    "description": "Search the internal PDF document library on company information using an embedding-based retriever. Use this to find relevant information for the user's prompt about ABLSoft or related topics. These are not published sources, they are internal company documents for contextual information.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -18,8 +26,10 @@ search_document_library_mcp_tool_def = {
                 "description": "The topic or theme to search for in company information documents."
             }
         },
-        "required": ["query"]
-    }
+        "required": ["query"],
+        "additionalProperties": False
+    },
+    "strict": True
 }
 
 search_linkedin_posts_mcp_tool_def = {
@@ -33,8 +43,10 @@ search_linkedin_posts_mcp_tool_def = {
                 "description": "The topic or theme to search for in viral post structures."
             }
         },
-        "required": ["query"]
-    }
+        "required": ["query"],
+        "additionalProperties": False
+    },
+    "strict": True
 }
 
 search_recent_news_mcp_tool_def = {
@@ -54,138 +66,251 @@ search_recent_news_mcp_tool_def = {
             },
             "sort_by": {
                 "type": "string",
-                "description": "The sorting criteria for the news articles. Decide which is more relevant to the user's prompt. Can be 'publishedAt' or 'relevancy'. Default to 'relevancy' if unsure."
+                "description": "The sorting criteria for the news articles. Decide which is more relevant to the user's prompt. Can be 'publishedAt' or 'relevancy'. Default to 'relevancy' if unsure.",
+                "enum": ["publishedAt", "relevancy"]
             }
         },
-        "required": ["query", "sort_by"]
-    }
+        "required": ["query", "sort_by"],
+        "additionalProperties": False
+    },
+    "strict": True
 }
 
-async def generate_post_for_prompt(user_prompt_text: str, async_log_callback: callable = None):
+web_search_mcp_tool_def = {
+    "name": "web_search",
+    "description": "Search the web for general information on any topic. Use this to find comprehensive market researchinformation beyond just news articles, including company information, industry insights, trends, and other relevant web content.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "The search query. Use descriptive keywords and phrases to find relevant web content."
+            }
+        },
+        "required": ["query"],
+        "additionalProperties": False
+    },
+    "strict": True
+}
+
+async def call_mcp_tools(llm_response, async_log_callback=None):
+    """
+    Separate function to handle MCP tool calling logic.
+    
+    Args:
+        llm_response: The LLM response containing tool calls
+        async_log_callback: Optional logging callback function
+    
+    Returns:
+        List of ToolMessage objects with tool results
+    """
+    async def _log(message):
+        if async_log_callback:
+            await asyncio.wait_for(async_log_callback(message), timeout=5.0)
+        else:
+            print(f"[LOG] {message}") 
+
+    tool_messages = []
+    
+    if not llm_response.tool_calls:
+        return tool_messages
+        
+    await _log(f"\nLLM decided to use {len(llm_response.tool_calls)} tool(s): {[tc.get('name', 'unknown') if isinstance(tc, dict) else getattr(tc, 'name', 'unknown') for tc in llm_response.tool_calls]}")
+    
+    for tool_call in llm_response.tool_calls:
+        tool_args = tool_call["args"]
+        server_url = "http://localhost:8050/sse" 
+        tool_output_content = "" 
+        tool_name = tool_call["name"]
+
+        await _log(f"Calling MCP tool '{tool_name}' with args: {tool_args} via SSE")
+
+        try:
+            async with sse_client(server_url) as (read_stream, write_stream):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    response = await session.call_tool(tool_name, arguments=tool_args)
+                    
+                    if hasattr(response, 'error') and response.error:
+                        error_message = getattr(response.error, 'message', str(response.error))
+                        tool_output_content = f"Tool Error from '{tool_name}': {error_message}"
+                        await _log(f"MCP Tool Error: {tool_output_content}")
+                    elif hasattr(response, 'content') and response.content is not None:
+                        if isinstance(response.content, list) and len(response.content) > 0 and hasattr(response.content[0], 'text'):
+                            tool_output_content = response.content[0].text
+                        elif hasattr(response.content, 'text'):
+                            tool_output_content = response.content.text
+                        else:
+                            tool_output_content = str(response.content)
+                        
+                        if not isinstance(tool_output_content, str):
+                            tool_output_content = str(tool_output_content)
+                    else:
+                        tool_output_content = f"Tool '{tool_name}' returned no usable content."
+                        await _log(tool_output_content)
+            
+            await _log(f"MCP tool '{tool_name}' raw output preview: {str(tool_output_content)}")
+
+        except Exception as e:
+            log_msg = f"Error during MCP tool '{tool_name}' call: {e}"
+            await _log(log_msg)
+            tool_output_content = f"The '{tool_name}' tool failed. Please proceed with available information."
+        
+        if not isinstance(tool_output_content, str):
+            tool_output_content = str(tool_output_content) if tool_output_content is not None else f"Tool '{tool_name}' resulted in a non-string output which has been converted."
+
+        tool_messages.append(ToolMessage(content=tool_output_content, tool_call_id=tool_call["id"]))
+    
+    return tool_messages
+
+# Agent 1: Gather information
+async def gather_information(user_prompt_text: str, llm, async_log_callback=None):
+   
+    async def _log(message):
+        if async_log_callback:
+            await asyncio.wait_for(async_log_callback(message), timeout=5.0)
+        else:
+            print(f"[LOG] {message}") 
+
+    await _log("\n=== PHASE 1: INFORMATION GATHERING ===")
+    
+    # Bind information gathering tools including web search
+    llm_with_info_tools = llm.bind_tools(
+        [search_document_library_mcp_tool_def, search_recent_news_mcp_tool_def, web_search_mcp_tool_def],
+        tool_choice="auto"
+    )
+    
+    info_system_message = """You are a research assistant. Your task is to gather comprehensive information relevant to the user's request for creating a LinkedIn post.
+
+    Use the available tools to:
+    1. Search the document library for relevant company/internal information
+    2. Search for recent news articles that relate to the topic
+    3. Perform general web searches for broader context and information
+
+    Be thorough in your information gathering. Call multiple tools with different queries to get a wide range of relevant information.
+    Your goal is to collect as much relevant context as possible, not to create the post yet.
+
+    After gathering information, provide a detailed summary INCLUDING KEY FACTS AND NUMBERS of all the relevant information you found in a loose, unstructured format.
+    """
+    
+    messages = [
+        SystemMessage(content=info_system_message),
+        HumanMessage(content=f"Gather comprehensive information for creating a LinkedIn post about: {user_prompt_text}")
+    ]
+    
+    # Initial LLM call for information gathering
+    try:
+        await _log("Invoking LLM for information gathering...")
+        info_response = await asyncio.wait_for(llm_with_info_tools.ainvoke(messages), timeout=60.0)
+        messages.append(info_response)
+        
+        # Process tool calls if any
+        if info_response.tool_calls:
+            tool_messages = await call_mcp_tools(info_response, async_log_callback)
+            messages.extend(tool_messages)
+            
+            # Get final information summary
+            final_info_response = await asyncio.wait_for(llm_with_info_tools.ainvoke(messages), timeout=60.0)
+            gathered_info = final_info_response.content
+        else:
+            gathered_info = info_response.content
+            
+        await _log(f"Information gathering complete. Gathered info preview: {str(gathered_info)}...")
+        return gathered_info
+        
+    except Exception as e:
+        await _log(f"Error during information gathering: {e}")
+        return f"Information gathering encountered an error: {e}. Proceeding with available information."
+
+# AGENT 2: Create viral post ------------------------------------------------------------
+async def create_viral_post(user_prompt_text: str, gathered_info: str, llm, async_log_callback=None):
     
     async def _log(message):
-        
         if async_log_callback:
+            await asyncio.wait_for(async_log_callback(message), timeout=5.0)
+        else:
+            print(f"[LOG] {message}") 
+
+    await _log("\n=== PHASE 2: VIRAL POST CREATION ===")
+    
+    # Bind only LinkedIn post search tool
+    llm_with_post_tools = llm.bind_tools(
+        [search_linkedin_posts_mcp_tool_def],
+        tool_choice="auto"
+    )
+    
+    post_system_message = """You are a social media marketing expert for the company ABLSoft. Your task is to create a single viral LinkedIn post using the provided information and examples of successful posts.
+
+    1. Use the search_linkedin_posts tool to find examples of viral posts related to the topic.
+    2. Create a compelling LinkedIn post that:
+        1. Uses the gathered information as context and facts
+        2. Follows the structure and style of successful viral posts, take inspiration from emojis and hashtags and use them in your post
+        3. Is engaging, authentic, and likely to go viral
+
+    YOUR FINAL RESPONSE MUST BE ONLY THE LINKEDIN POST AND A ONE-SENTENCE IMAGE MEDIA GUIDELINE.
+    ABSOLUTELY NO PRE-AMBLE, EXPLANATIONS, APOLOGIES, OR CONVERSATIONAL FILLER.
+    """
+    
+    messages = [
+        SystemMessage(content=post_system_message),
+        HumanMessage(content=f"""Original request: {user_prompt_text}, Gathered Information: {gathered_info},Create a viral LinkedIn post using this information and examples from successful posts.""")
+    ]
+    
+    try:
+        await _log("Invoking LLM for post creation...")
+        post_response = await asyncio.wait_for(llm_with_post_tools.ainvoke(messages), timeout=60.0)
+        messages.append(post_response)
+        
+        # Process tool calls if any
+        if post_response.tool_calls:
+            tool_messages = await call_mcp_tools(post_response, async_log_callback)
+            messages.extend(tool_messages)
             
-            await async_log_callback(message)
+            # Get final post
+            final_post_response = await asyncio.wait_for(llm_with_post_tools.ainvoke(messages), timeout=120.0)
+            final_post = final_post_response.content
+        else:
+            final_post = post_response.content
+            
+        await _log("Viral post creation complete.")
+        return final_post
+        
+    except Exception as e:
+        await _log(f"Error during post creation: {e}")
+        return f"Post creation encountered an error: {e}"
+    
+
+# MAIN FUNCTION FOR ORCHESTRATING AGENTS ------------------------------------------------------------
+async def generate_post_for_prompt(user_prompt_text: str, async_log_callback: callable = None):
+   
+    async def _log(message):
+        if async_log_callback:
+            await asyncio.wait_for(async_log_callback(message), timeout=5.0)
+        else:
+            print(f"[LOG] {message}") 
 
     try:
-        llm = ChatOllama(model="llama3.1:8b", request_timeout=120.0) 
-        print(f"ChatOllama created successfully")
+        # llm = ChatOllama(model="llama3.1:8b", request_timeout=120.0)
+        # await _log("LLM initialized successfully")
+        llm = ChatOpenAI(
+            model="gpt-4o", 
+            request_timeout=120.0, 
+            temperature=0.7,
+            model_kwargs={"response_format": {"type": "text"}}
+        )
+        await _log("GPT-4o LLM initialized successfully with Responses API")
+        
+        # Agent 1: Information Gathering
+        gathered_info = await gather_information(user_prompt_text, llm, async_log_callback)
+        
+        # Agent 2: Viral Post Creation
+        final_post = await create_viral_post(user_prompt_text, gathered_info, llm, async_log_callback)
+        
+        return final_post
+        
     except Exception as llm_error:
-        print(f"Failed to create ChatOllama: {llm_error}")
+        await _log(f"Failed to create ChatOpenAI or process request: {llm_error}")
         raise llm_error
         
-    try:
-        llm_with_tools = llm.bind_tools([search_linkedin_posts_mcp_tool_def, search_recent_news_mcp_tool_def, search_document_library_mcp_tool_def]) 
-        
-    except Exception as tools_error:
-        print(f"Failed to bind tools: {tools_error}")
-        raise tools_error
-
-    # user_prompt_text = input("prompt: ") # Removed input
-
-    system_message_content = """You are a social media marketing employee. Your task is to write a single viral LinkedIn post for the user.
-
-                            YOUR RESPONSE MUST BE ONLY THE LINKEDIN POST AND A ONE-SENTENCE MEDIA GUIDELINE.
-                            ABSOLUTELY NO PRE-AMBLE, EXPLANATIONS, APOLOGIES, OR CONVERSATIONAL FILLER.
-
-                            Follow this process internally, but do not describe it in your output:
-                            1. To help make the post VIRAL, you SHOULD strongly prioritize using the 'search_linkedin_posts' tool to find viral post examples related to the user's query. Analyze the structure, style, and common elements of these successful posts.
-                            2. Use the 'search_document_library' tool to find relevant contextual information from the company's internal documents to incorporate into the post, if applicable to the user's request.
-                            3. Based on the user's query AND the content of potential viral posts, determine if you also need to use the 'search_recent_news' tool to gather current, relevant information.
-                            4. Silently analyze the results from any tools used. If a tool returns an error, an empty result, or irrelevant information, acknowledge this internally and proceed to write the best post possible using any other successfully retrieved information and the original prompt. Do not mention the tool's failure or shortcomings in your final output. Your goal is to create a compelling post regardless of tool issues.
-                            5. Write a LinkedIn post that draws inspiration from viral examples (if found) and incorporates relevant news (if found and relevant) and company information.
-                            6. Conclude your response with a single, brief one-sentence guideline for media on a new line after the post. Example: "Media: A dynamic image representing innovation in finance."
-
-                            Company information to draw from if necessary given the user's query (use this information silently):
-                                - ABLSoft is a software company providing asset based lending solutions. 
-                                - Don't let legacy processes hold you back. Harness ABLSoft to automate BBC Processing, simplify the borrower experience and track loan performance – all in one secure platform.
-                                - Lend with Confidence. ABL Expertise. Personalized Service.
-                                - Effortless Borrowing Base. Save time and automate your BBC intake process. Standardize and map data from Excel, PDFs, online BBC entry, even directly from borrowers' accounting systems.
-                                - Intelligent Processing Onboard any deal (AR, inventory, term) and customize as needed (sublimits, ineligibles, lockbox). Instantly calculate availability and streamline advance approvals.
-                                - Seamless Insights. Get immediate visibility with real-time dashboards and 30+ standard reports. Design your own reports in minutes to track borrower performance and compliance.
-                            """
-    messages = [
-        SystemMessage(content=system_message_content),
-        HumanMessage(content=user_prompt_text),
-    ]
-
-    await _log("\nAnalyzing user prompt and potentially using tools via MCP (SSE)...")
-
-    try:
-        ai_msg = await llm_with_tools.ainvoke(messages) 
-    except Exception as invoke_error:
-        print(f"[MAIN.PY ERROR] llm_with_tools.ainvoke failed: {invoke_error}")
-        raise invoke_error
-        
-    messages.append(ai_msg)
-
-    if ai_msg.tool_calls:
-        await _log(f"\nLLM decided to use a tool: {ai_msg.tool_calls[0]['name']}")
-        for tool_call in ai_msg.tool_calls:
-            tool_args = tool_call["args"]
-            server_url = "http://localhost:8050/sse" 
-            tool_output_content = "" 
-            
-            tool_name = tool_call["name"]
-            await _log(f"Calling MCP tool '{tool_name}' with args: {tool_args} via SSE")
-
-            try:
-                async with sse_client(server_url) as (read_stream, write_stream):
-                    async with ClientSession(read_stream, write_stream) as session:
-                        await session.initialize()
-                        response = await session.call_tool(tool_name, arguments=tool_args)
-                        
-                        if hasattr(response, 'error') and response.error:
-                            error_message = getattr(response.error, 'message', str(response.error))
-                            tool_output_content = f"Tool Error from '{tool_name}': {error_message}"
-                            await _log(f"MCP Tool Error: {tool_output_content}")
-                        elif hasattr(response, 'content') and response.content is not None: # Check content is not None
-                            if isinstance(response.content, list) and len(response.content) > 0 and hasattr(response.content[0], 'text'):
-                                tool_output_content = response.content[0].text
-                            elif hasattr(response.content, 'text'): # Check if content itself has text
-                                tool_output_content = response.content.text
-                            else:
-                                tool_output_content = str(response.content) # Fallback to string representation
-                            
-                            # Ensure tool_output_content is a string if it was derived from response.content
-                            if not isinstance(tool_output_content, str):
-                                tool_output_content = str(tool_output_content)
-
-                        elif response.content is None and not (hasattr(response, 'error') and response.error):
-                             tool_output_content = f"Tool '{tool_name}' returned no specific content or error. This might indicate no results found or an issue."
-                             await _log(tool_output_content)
-                        else:
-                            tool_output_content = f"Unknown MCP tool response structure or empty result for '{tool_name}'."
-                            await _log(tool_output_content)
-                
-                await _log(f"MCP tool '{tool_name}' raw output preview: {str(tool_output_content)[:200]}...") # Log a preview
-
-            except ConnectionRefusedError:
-                log_msg = f"Error calling MCP tool '{tool_name}': Connection refused. Is the MCP server running at {server_url}?"
-                await _log(log_msg)
-                tool_output_content = f"Error: Could not connect to MCP server for tool '{tool_name}'. Please ensure it is running with SSE transport."
-            except Exception as e:
-                import traceback 
-                log_msg = f"Error during MCP tool '{tool_name}' call (client-side full traceback): {e}"
-                await _log(log_msg)
-                tool_output_content = f"The '{tool_name}' tool failed to execute or return valid data due to a client-side or communication error: {str(e)}. Please proceed based on other available information and the user's original request."
-            
-            if not isinstance(tool_output_content, str):
-                tool_output_content = str(tool_output_content) if tool_output_content is not None else f"Tool '{tool_name}' resulted in a non-string output which has been converted."
-
-            messages.append(ToolMessage(content=tool_output_content, tool_call_id=tool_call["id"]))
-        
-        await _log("\nGenerating LinkedIn post based on tool output and user prompt...")
-        
-        # Bind tools again for the final response generation
-        final_response_msg = await llm.bind_tools([search_document_library_mcp_tool_def, search_linkedin_posts_mcp_tool_def, search_recent_news_mcp_tool_def]).ainvoke(messages) 
-        generated_content_final = final_response_msg.content
-    else:
-        await _log("\nLLM decided not to use a tool. Generating post directly...")
-        generated_content_final = ai_msg.content
-
-    return generated_content_final
-
+    
 

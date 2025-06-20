@@ -5,6 +5,7 @@ from .news import get_news
 import os # Added for path manipulation
 from langchain_ollama import OllamaEmbeddings # Added
 from langchain_chroma import Chroma # Added
+from linkup import LinkupClient # Added for web search
 
 
 load_dotenv("../.env")
@@ -12,8 +13,8 @@ load_dotenv("../.env")
 # --- Global Configurations for Vector Stores ---
 # Determine the absolute path to the directory where server.py is located
 SERVER_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-# DB_LOCATION will be backend/mcpserver/local_embeddings_db/
-DB_LOCATION = os.path.join(SERVER_SCRIPT_DIR, "local_embeddings_db")
+# DB_LOCATION will be backend/local_embeddings_db/
+DB_LOCATION = os.path.join(SERVER_SCRIPT_DIR, "..", "local_embeddings_db")
 
 # Initialize embeddings model once
 try:
@@ -138,34 +139,126 @@ def search_document_library(query: str) -> str:
     print(f"MCP Tool: Searching document library with query: '{query}'")
     if shared_embeddings is None:
         return "Error: Embeddings model not available for document library search."
-    try:
-        pdf_vector_store = Chroma(
-            collection_name="pdf_text_content",
-            persist_directory=DB_LOCATION,
-            embedding_function=shared_embeddings
-        )
-        retriever = pdf_vector_store.as_retriever(search_kwargs={"k": 5})
-        retrieved_docs = retriever.invoke(query)
-        
-        if not retrieved_docs:
-            return "No relevant documents found in the library for this topic."
-        
-        results = []
-        # Limit to top 3 for conciseness in the MCP tool response
-        for i, doc in enumerate(retrieved_docs[:3]): 
-            result_text = f"Document Segment {i+1}:\n"
-            if doc.metadata and doc.metadata.get('source_filename'):
-                result_text += f"Source PDF: {doc.metadata['source_filename']}\n"
-            else:
-                result_text += "Source PDF: Unknown\n"
-            result_text += f"Content Snippet: ...{doc.page_content[:500]}...\n" # Show a snippet
-            results.append(result_text)
-        
-        return "\n---\n".join(results) if results else "No relevant document segments found after formatting."
+    
+    max_retries = 2
+    for attempt in range(max_retries):
+        try:
+            pdf_vector_store = Chroma(
+                collection_name="pdf_text_content",
+                persist_directory=DB_LOCATION,
+                embedding_function=shared_embeddings
+            )
+            retriever = pdf_vector_store.as_retriever(search_kwargs={"k": 5})
+            retrieved_docs = retriever.invoke(query)
+            
+            if not retrieved_docs:
+                return "No relevant documents found in the library for this topic."
+            
+            results = []
+            # Limit to top 3 for conciseness in the MCP tool response
+            for i, doc in enumerate(retrieved_docs[:3]): 
+                result_text = f"Document Segment {i+1}:\n"
+                if doc.metadata and doc.metadata.get('source_filename'):
+                    result_text += f"Source PDF: {doc.metadata['source_filename']}\n"
+                    
+                    # Add chunk information if available
+                    if doc.metadata.get('chunk_index') is not None:
+                        chunk_idx = doc.metadata.get('chunk_index')
+                        total_chunks = doc.metadata.get('total_chunks', '?')
+                        result_text += f"Chunk: {chunk_idx + 1} of {total_chunks}\n"
+                        
+                    if doc.metadata.get('chunk_size'):
+                        result_text += f"Chunk Size: {doc.metadata['chunk_size']} chars\n"
+                else:
+                    result_text += "Source PDF: Unknown\n"
+                    
+                result_text += f"Content: {doc.page_content}\n"  # Return full content instead of snippet
+                results.append(result_text)
+            
+            return "\n---\n".join(results) if results else "No relevant document segments found after formatting."
 
+        except Exception as e:
+            error_str = str(e).lower()
+            print(f"Error in MCP search_document_library tool (attempt {attempt + 1}): {e}")
+            
+            # Check for specific HNSW index errors
+            if "nothing found on disk" in error_str or "hnsw" in error_str:
+                if attempt < max_retries - 1:
+                    print(f"HNSW index error detected, retrying... (attempt {attempt + 1}/{max_retries})")
+                    import time
+                    time.sleep(0.5)  # Brief delay before retry
+                    continue
+                else:
+                    return "Error: Vector database index is temporarily unavailable. Please try uploading PDFs again or contact support if the issue persists."
+            else:
+                # For other errors, don't retry
+                break
+    
+    return f"Error retrieving documents from library: {str(e)}"
+
+
+# Add the web search tool using Linkup
+@mcp.tool()
+def web_search(query: str) -> str:
+    """
+    Search the web for general information using Linkup API.
+    query (str): The search query to find relevant web content.
+    Returns: str: Formatted web search results with titles, URLs, and snippets, or an error message.
+    """
+    print(f"MCP Tool: Searching web with query: '{query}'")
+    
+    try:
+        # Initialize Linkup client with API key from environment
+        linkup_api_key = os.getenv('LINKUP_API_KEY')
+        if not linkup_api_key:
+            return "Error: LINKUP_API_KEY not found in environment variables. Please set your Linkup API key."
+        
+        client = LinkupClient(api_key=linkup_api_key)
+        
+        # Perform the search
+        response = client.search(
+            query=query,
+            depth="standard",
+            output_type="searchResults",
+            include_images=False,
+        )
+        
+        # Check if response has results
+        if not response or not hasattr(response, 'results') or not response.results:
+            return f"No web search results found for query: '{query}'"
+        
+        # Format the results
+        formatted_results = []
+        for i, result in enumerate(response.results[:5]):  # Limit to top 5 results
+            try:
+                # Handle both text and image results
+                if hasattr(result, 'type') and result.type == 'image':
+                    continue  # Skip image results for now
+                
+                title = getattr(result, 'name', '') or getattr(result, 'title', 'No title available')
+                url = getattr(result, 'url', 'No URL available')
+                content = getattr(result, 'content', '') or getattr(result, 'snippet', '') or 'No content available'
+                
+                formatted_result = (
+                    f"Web Result {i+1}:\n"
+                    f"  Title: {title}\n"
+                    f"  URL: {url}\n"
+                    f"  Content: {content[:500]}{'...' if len(content) > 500 else ''}"
+                )
+                formatted_results.append(formatted_result)
+            except Exception as e:
+                print(f"Error formatting result {i+1}: {e}")
+                continue
+        
+        if not formatted_results:
+            return f"No valid web search results could be formatted for query: '{query}'"
+        
+        return "\n\n---\n\n".join(formatted_results)
+        
     except Exception as e:
-        print(f"Error in MCP search_document_library tool: {e}")
-        return f"Error retrieving documents from library: {str(e)}"
+        error_message = f"Error performing web search: {str(e)}"
+        print(f"MCP Tool web_search error: {error_message}")
+        return error_message
 
 
 def start_mcp_server():

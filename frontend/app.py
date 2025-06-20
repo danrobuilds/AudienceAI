@@ -1,3 +1,4 @@
+# run with: streamlit run app.py
 import streamlit as st
 import asyncio
 import sys
@@ -27,27 +28,16 @@ if 'show_pdf_uploader' not in st.session_state: # For controlling uploader visib
     st.session_state.show_pdf_uploader = False
 if 'pdf_upload_messages' not in st.session_state: # To store messages for batch upload
     st.session_state.pdf_upload_messages = []
+if 'log_placeholder' not in st.session_state: # For dynamic log updates
+    st.session_state.log_placeholder = None
 
 # --- Function Definitions (Must be before calls) ---
 # --- Dynamic Log Display for Post Generation ---
-dynamic_log_display_placeholder = st.empty()
-
 def update_dynamic_logs():
     print(f"[DEBUG] update_dynamic_logs called - processing: {st.session_state.processing}, logs count: {len(st.session_state.logs)}")
-    
-    if st.session_state.processing and st.session_state.logs:
-        print(f"[DEBUG] Showing logs: {st.session_state.logs}")
-        # Use with statement for better control
-        with dynamic_log_display_placeholder.container():
-            st.text_area(
-                "Current Generation Logs",
-                "\n".join(st.session_state.logs),
-                height=150,
-                disabled=True,
-                key=f"dynamic_logs_{int(time.time() * 1000000)}"  # More unique key
-            )
-    else:
-        dynamic_log_display_placeholder.empty()
+    # Since we can't update UI dynamically without st.rerun() causing deadlock,
+    # we'll just log to console and show final results after completion
+    pass
 
 async def run_generation(prompt):
     print(f"[DEBUG] Starting run_generation with prompt: {prompt}")
@@ -58,8 +48,7 @@ async def run_generation(prompt):
         print(f"[DEBUG] Log callback received: {message}")
         st.session_state.logs.append(message)
         update_dynamic_logs()
-        st.rerun() # Force a rerun to update the UI
-        # await asyncio.sleep(0.1) # Removed as requested and because st.rerun() makes it unreachable here
+        
 
     try:
         print(f"[DEBUG] Calling generate_post_for_prompt...")
@@ -108,25 +97,92 @@ async def test_function_call():
         print(f"[ERROR] Full traceback: {traceback.format_exc()}")
         raise
 
+def extract_sources_from_logs(logs):
+    """Extract source information from generation logs"""
+    sources = {
+        'pdfs': [],
+        'news': [],
+        'posts': [],
+        'web': []  # Added for web search results
+    }
+    
+    current_log = ""
+    for log in logs:
+        current_log += log + "\n"
+    
+    # Extract PDF sources - look for "Source PDF:" pattern
+    if "Source PDF:" in current_log:
+        import re
+        # Updated pattern to match the actual log format
+        pdf_matches = re.findall(r'Source PDF: ([^\n]+)', current_log)
+        sources['pdfs'] = list(set(pdf_matches))  # Remove duplicates
+    
+    # Extract news article sources - look for "Article X:" pattern
+    if "Article " in current_log and "Title:" in current_log:
+        import re
+        # Find article blocks that contain Title, Source, and URL
+        article_blocks = re.findall(r'Article \d+:\s*\n\s*Title: ([^\n]+)\s*\n\s*Source: ([^\n]+)[\s\S]*?\n\s*URL: (https?://[^\s\n]+)', current_log, re.MULTILINE)
+        
+        for title, source, url in article_blocks:
+            if title and title.strip() != "N/A":
+                sources['news'].append({
+                    'title': title.strip(),
+                    'url': url.strip(),
+                    'source': source.strip()
+                })
+    
+    # Extract web search results - look for "Result X:" pattern (different from news articles)
+    if "MCP Tool: Searching web" in current_log or ("Result " in current_log and "Title:" in current_log and "URL:" in current_log):
+        import re
+        # Look for web search result patterns (Result X: format)
+        web_blocks = re.findall(r'Result \d+:\s*\n\s*Title: ([^\n]+)\s*\n\s*URL: (https?://[^\s\n]+)', current_log, re.MULTILINE)
+        
+        for title, url in web_blocks:
+            if title and title.strip() != "N/A" and "newsapi" not in url.lower():
+                sources['web'].append({
+                    'title': title.strip(),
+                    'url': url.strip()
+                })
+    
+    # Extract viral post sources - look for "Viral Post Example X:" pattern
+    if "Viral Post Example" in current_log:
+        import re
+        # Updated pattern to match the actual viral post format
+        viral_blocks = re.findall(r'Viral Post Example \d+:[\s\S]*?Source: ([^,\n]+)(?:, Views: ([^,\n]+))?(?:, Reactions: ([^,\n]+))?', current_log, re.MULTILINE)
+        
+        for match in viral_blocks:
+            source = match[0].strip() if match[0] else "Unknown"
+            views = match[1].strip() if len(match) > 1 and match[1] else "Unknown"
+            reactions = match[2].strip() if len(match) > 2 and match[2] else "Unknown"
+            
+            if source and source != "N/A" and source != "Unknown":
+                sources['posts'].append({
+                    'source': source,
+                    'views': views,
+                    'reactions': reactions
+                })
+    
+    return sources
+
 # --- Main App Layout ---
 st.title("Hi, I'm Audy, your AI Social Media Marketing Expert.")
 
 col1, col2 = st.columns(2)
 
 with col1:
-    st.header("Instructions")
-    st.info(
-        """
-        1. Enter your post idea or topic in the text box below.
-        2. Click 'Generate Post' or manage documents via 'Upload PDFs'.
-        3. System logs and generated posts will appear below.
-        """
-    )
+    st.header("What should I work on?")
+    # st.info(
+    #     """
+    #     1. Enter your post idea or topic in the text box below.
+    #     2. Click 'Generate Post' or manage documents via 'Upload PDFs'.
+    #     3. System logs and generated posts will appear below.
+    #     """
+    # )
     
     st.session_state.user_prompt_input = st.text_area(
-        "Enter your LinkedIn post prompt:", 
+        "", 
         value=st.session_state.user_prompt_input,
-        height=150,
+        height=68,
         placeholder="e.g., Write a post about the future of AI in asset-based lending...",
         key="user_prompt_input_widget"
     )
@@ -143,18 +199,16 @@ with col1:
                     st.session_state.processing = True
                     st.session_state.logs = ["Starting LinkedIn post generation..."] # Clear previous logs and set initial message
                     st.session_state.generated_post = ""
-                    update_dynamic_logs() # Populate log area with initial message and show processing state
                     
-                    # The st.rerun() that was here is removed, allowing asyncio.run to be called.
-                    # The UI updates above will be visible while asyncio.run blocks.
-                    asyncio.run(run_generation(st.session_state.user_prompt_input))
+                    # Show a spinner during processing
+                    with st.spinner("Generating LinkedIn post... Please wait."):
+                        asyncio.run(run_generation(st.session_state.user_prompt_input))
                         
                 except Exception as button_error: # This catches errors from asyncio.run or initial setup
                     error_msg = f"Button click error or error during generation setup: {str(button_error)}"
                     print(f"[ERROR] {error_msg}")
                     st.session_state.logs.append(error_msg)
                     st.session_state.processing = False # Ensure processing is reset
-                    update_dynamic_logs() # Show error in logs
                     st.rerun() # Rerun to reflect error state
             else:
                 st.warning("Please enter a prompt for the LinkedIn post.")
@@ -227,7 +281,7 @@ if st.session_state.show_pdf_uploader:
 
 # --- Generated Post Display (col2) ---
 with col2:
-    st.subheader("Generated LinkedIn Post")
+    
     st.text_area(
         "Editable Generated Post", 
         value=st.session_state.generated_post, 
@@ -236,10 +290,77 @@ with col2:
         help="This is the generated post. You can edit it here."
     )
 
-# --- Final Logs Expander (Full Width) ---
+# --- Generation Logs Display (Full Width) ---
+# Show logs after completion
 if st.session_state.logs and not st.session_state.processing:
-    with st.expander("View Full Generation Logs", expanded=False):
-        st.text_area("All Logs", "\n".join(st.session_state.logs), height=200, disabled=True, key="final_logs_expander_area")
+    with st.expander("View Generation Logs", expanded=True):
+        st.text_area("Generation Logs", "\n".join(st.session_state.logs), height=200, disabled=True, key="final_logs_expander_area")
 
-st.markdown("<hr>", unsafe_allow_html=True)
-st.markdown("<div style='text-align: center;'>--- Powered by AudienceAI ---</div>", unsafe_allow_html=True) 
+# --- Sources Display (Full Width) ---
+# Show sources used in generation after completion
+if st.session_state.logs and not st.session_state.processing and st.session_state.generated_post:
+    sources = extract_sources_from_logs(st.session_state.logs)
+    
+    # Only show sources section if we have any sources
+    if any(sources.values()):  # Check if any of the source lists have content
+        st.markdown("---")
+        st.subheader("📚 Sources Used in Generation")
+        
+        # Create columns for different source types
+        col_sources_1, col_sources_2, col_sources_3, col_sources_4 = st.columns(4)
+        
+        # PDF Sources
+        with col_sources_1:
+            if sources['pdfs']:
+                st.markdown("**📄 PDF Documents**")
+                for pdf in sources['pdfs']:
+                    with st.container():
+                        st.markdown(f"""
+                        <div style="border: 1px solid #ddd; border-radius: 5px; padding: 10px; margin: 5px 0; background-color: #f8f9fa;">
+                            <strong>📄 {pdf}</strong><br>
+                            <small>Internal document</small>
+                        </div>
+                        """, unsafe_allow_html=True)
+        
+        # News Articles
+        with col_sources_2:
+            if sources['news']:
+                st.markdown("**📰 News Articles**")
+                for article in sources['news']:
+                    with st.container():
+                        st.markdown(f"""
+                        <div style="border: 1px solid #ddd; border-radius: 5px; padding: 10px; margin: 5px 0; background-color: #f0f8ff;">
+                            <strong>📰 {article['title']}</strong><br>
+                            <a href="{article['url']}" target="_blank" style="color: #0066cc; text-decoration: none;">
+                                🔗 Read Article
+                            </a>
+                        </div>
+                        """, unsafe_allow_html=True)
+        
+        # Web Search Results
+        with col_sources_3:
+            if sources['web']:
+                st.markdown("**🌐 Web Sources**")
+                for web_result in sources['web']:
+                    with st.container():
+                        st.markdown(f"""
+                        <div style="border: 1px solid #ddd; border-radius: 5px; padding: 10px; margin: 5px 0; background-color: #fff0f5;">
+                            <strong>🌐 {web_result['title']}</strong><br>
+                            <a href="{web_result['url']}" target="_blank" style="color: #0066cc; text-decoration: none;">
+                                🔗 Visit Site
+                            </a>
+                        </div>
+                        """, unsafe_allow_html=True)
+        
+        # Viral Posts
+        with col_sources_4:
+            if sources['posts']:
+                st.markdown("**💼 Viral Posts**")
+                for post in sources['posts']:
+                    with st.container():
+                        st.markdown(f"""
+                        <div style="border: 1px solid #ddd; border-radius: 5px; padding: 10px; margin: 5px 0; background-color: #f0fff0;">
+                            <strong>💼 {post['source']}</strong><br>
+                            <small>👁️ {post['views']} views</small>
+                        </div>
+                        """, unsafe_allow_html=True)
