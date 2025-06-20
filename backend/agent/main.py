@@ -9,6 +9,8 @@ from mcp.client.sse import sse_client
 import mcp.types 
 import os
 from dotenv import load_dotenv
+import re
+import uuid
 
 # Load environment variables
 dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
@@ -93,6 +95,33 @@ web_search_mcp_tool_def = {
     "strict": True
 }
 
+generate_image_mcp_tool_def = {
+    "name": "generate_image",
+    "description": "Generate an image for the LinkedIn post based on the post content and style. Use this when the post would benefit from a visual element.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "prompt": {
+                "type": "string",
+                "description": "Detailed description of the image to generate, including style, composition, and key elements that align with the post content. Avoid generating images with repetitive imagery and excessive text."
+            },
+            "style": {
+                "type": "string",
+                "description": "Visual style for the image (e.g., 'professional', 'infographic', 'modern', 'minimalist', 'tech-focused')",
+                "enum": ["professional", "infographic", "modern", "minimalist", "tech-focused", "corporate"]
+            },
+            "aspect_ratio": {
+                "type": "string",
+                "description": "Aspect ratio for content optimization",
+                "enum": ["16:9", "1:1", "4:5"]
+            }
+        },
+        "required": ["prompt", "style", "aspect_ratio"],
+        "additionalProperties": False
+    },
+    "strict": True
+}
+
 async def call_mcp_tools(llm_response, async_log_callback=None):
     """
     Separate function to handle MCP tool calling logic.
@@ -149,7 +178,11 @@ async def call_mcp_tools(llm_response, async_log_callback=None):
                         tool_output_content = f"Tool '{tool_name}' returned no usable content."
                         await _log(tool_output_content)
             
-            await _log(f"MCP tool '{tool_name}' raw output preview: {str(tool_output_content)}")
+            # Avoid printing base64 data for image generation
+            if tool_name == "generate_image" and "IMAGE_GENERATED|" in str(tool_output_content):
+                await _log(f"MCP tool '{tool_name}' completed successfully - image data ready")
+            else:
+                await _log(f"MCP tool '{tool_name}' raw output preview: {str(tool_output_content)}")
 
         except Exception as e:
             log_msg = f"Error during MCP tool '{tool_name}' call: {e}"
@@ -233,21 +266,24 @@ async def create_viral_post(user_prompt_text: str, gathered_info: str, llm, asyn
 
     await _log("\n=== PHASE 2: VIRAL POST CREATION ===")
     
-    # Bind only LinkedIn post search tool
+    # Bind LinkedIn post search and image generation tools
     llm_with_post_tools = llm.bind_tools(
-        [search_linkedin_posts_mcp_tool_def],
+        [search_linkedin_posts_mcp_tool_def, generate_image_mcp_tool_def],
         tool_choice="auto"
     )
     
     post_system_message = """You are a social media marketing expert for the company ABLSoft. Your task is to create a single viral LinkedIn post using the provided information and examples of successful posts.
 
     1. Use the search_linkedin_posts tool to find examples of viral posts related to the topic.
-    2. Create a compelling LinkedIn post that:
-        1. Uses the gathered information as context and facts
-        2. Follows the structure and style of successful viral posts, take inspiration from emojis and hashtags and use them in your post
-        3. Is engaging, authentic, and likely to go viral
+    2. Optionally use the generate_image tool if the post would benefit from a compelling visual element. The image should have no text.
+    3. Create a compelling LinkedIn post that:
+        - Uses the gathered information as context and facts. Describes entities if their name is not known. Does not include direct quotes in the post unless they exist directly in gathered information.
+        - Follows the structure and style of successful viral posts, take inspiration from emojis and hashtags and use them in your post. Avoid astericks.
+        - Is engaging, authentic, and likely to go viral
+        - Includes an image if one was generated
 
-    YOUR FINAL RESPONSE MUST BE ONLY THE LINKEDIN POST AND A ONE-SENTENCE IMAGE MEDIA GUIDELINE.
+    YOUR FINAL RESPONSE MUST BE ONLY THE LINKEDIN POST CONTENT.
+    If an image was generated, include a note at the end: "Image: [brief description of generated image]"
     ABSOLUTELY NO PRE-AMBLE, EXPLANATIONS, APOLOGIES, OR CONVERSATIONAL FILLER.
     """
     
@@ -261,9 +297,45 @@ async def create_viral_post(user_prompt_text: str, gathered_info: str, llm, asyn
         post_response = await asyncio.wait_for(llm_with_post_tools.ainvoke(messages), timeout=60.0)
         messages.append(post_response)
         
+        # Track generated images
+        generated_images = []
+        
         # Process tool calls if any
         if post_response.tool_calls:
             tool_messages = await call_mcp_tools(post_response, async_log_callback)
+            
+            # Extract and process any generated images BEFORE sending to LLM
+            for i, tool_msg in enumerate(tool_messages):
+                if "IMAGE_GENERATED|" in tool_msg.content:
+                    try:
+                        # Parse the structured response
+                        content = tool_msg.content
+                        parts = content.split("|")
+                        
+                        # Extract metadata
+                        filename = parts[1].split(":")[1] if len(parts) > 1 else f"generated_{uuid.uuid4().hex[:8]}.png"
+                        size = parts[2].split(":")[1] if len(parts) > 2 else "Unknown"
+                        style = parts[3].split(":")[1] if len(parts) > 3 else "Unknown"
+                        base64_data = parts[4].split(":", 1)[1] if len(parts) > 4 else None
+                        
+                        if base64_data:
+                            generated_images.append({
+                                "filename": filename,
+                                "base64_data": base64_data,
+                                "size": size,
+                                "style": style
+                            })
+                            
+                            # Replace the tool message with a clean version for LLM (no base64)
+                            tool_messages[i].content = f"Image generated successfully. Filename: {filename}, Size: {size}, Style: {style}. The image has been prepared for display."
+                            
+                            await _log(f"Image generated and prepared for frontend: {filename}")
+                        else:
+                            await _log(f"Warning: Could not extract base64 data from image generation")
+                        
+                    except Exception as e:
+                        await _log(f"Error processing generated image: {e}")
+            
             messages.extend(tool_messages)
             
             # Get final post
@@ -273,11 +345,21 @@ async def create_viral_post(user_prompt_text: str, gathered_info: str, llm, asyn
             final_post = post_response.content
             
         await _log("Viral post creation complete.")
-        return final_post
+        
+        # Return both post and image info
+        result = {
+            "post_content": final_post,
+            "generated_images": generated_images
+        }
+        
+        return result
         
     except Exception as e:
         await _log(f"Error during post creation: {e}")
-        return f"Post creation encountered an error: {e}"
+        return {
+            "post_content": f"Post creation encountered an error: {e}",
+            "generated_images": []
+        }
     
 
 # MAIN FUNCTION FOR ORCHESTRATING AGENTS ------------------------------------------------------------
@@ -304,9 +386,9 @@ async def generate_post_for_prompt(user_prompt_text: str, async_log_callback: ca
         gathered_info = await gather_information(user_prompt_text, llm, async_log_callback)
         
         # Agent 2: Viral Post Creation
-        final_post = await create_viral_post(user_prompt_text, gathered_info, llm, async_log_callback)
+        result = await create_viral_post(user_prompt_text, gathered_info, llm, async_log_callback)
         
-        return final_post
+        return result
         
     except Exception as llm_error:
         await _log(f"Failed to create ChatOpenAI or process request: {llm_error}")
