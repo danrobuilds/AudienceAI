@@ -12,3 +12,4 @@ fastmcp
 newsapi-python
 pdfplumber
 beautifulsoup4
+supabase

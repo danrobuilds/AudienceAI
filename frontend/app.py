@@ -14,7 +14,7 @@ warnings.filterwarnings('ignore')
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 # Now we can import from the backend
-from backend.agent.main import generate_post_for_prompt
+from backend.agent.orchestrator import generate_post_for_prompt
 from backend.agent.pdf_extractor import process_and_add_pdf
 
 st.set_page_config(layout="wide")
@@ -182,7 +182,7 @@ async def run_generation(prompt):
 # Test the import right away
 try:
     print("[DEBUG] Testing backend import...")
-    from backend.agent.main import generate_post_for_prompt
+    from backend.agent.orchestrator import generate_post_for_prompt
     print("[DEBUG] Backend import successful!")
     
     # Test if we can call the function (without awaiting)

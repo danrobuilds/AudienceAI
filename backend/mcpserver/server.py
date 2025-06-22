@@ -10,6 +10,10 @@ from openai import OpenAI # Added for image generation
 import base64
 import uuid
 
+# Import existing Supabase client
+import sys
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from services.supabase_service import supabase
 
 load_dotenv("../.env")
 
@@ -94,34 +98,59 @@ def search_recent_news(query: str, sort_by: str = "publishedAt") -> str:
     return "\n\n---\n\n".join(formatted_articles) if formatted_articles else "No news articles could be formatted."
 
 
-# Add the vector search tool for LinkedIn posts
+# Add the vector search tool for LinkedIn posts using Supabase
 @mcp.tool()
 def search_linkedin_posts(query: str) -> str:
     """
-    Search for viral LinkedIn posts using an embedding-based retriever.
+    Search for viral LinkedIn posts using Supabase vector similarity search.
     query (str): The topic or theme to search for in viral posts.
     Returns: str: Formatted examples of viral posts related to the query, or a message if no posts are found.
     """
     print(f"MCP Tool: Searching for viral posts with query: '{query}'")
+    
     if shared_embeddings is None:
         return "Error: Embeddings model not available for LinkedIn post search."
+    
+    if supabase is None:
+        return "Error: Supabase client not available for LinkedIn post search."
+    
     try:
-        linkedin_vector_store = Chroma(
-            collection_name="viral_post_data",
-            persist_directory=DB_LOCATION,
-            embedding_function=shared_embeddings
-        )
-        retriever = linkedin_vector_store.as_retriever(search_kwargs={"k": 10})
-        retrieved_docs = retriever.invoke(query)
+        # Generate embedding for the query
+        query_embedding = shared_embeddings.embed_query(query)
         
-        if not retrieved_docs:
+        # Use generic search function with table name parameter
+        response = supabase.rpc(
+            'search_similar_vectors',
+            {
+                'query_embedding': query_embedding,
+                'table_name': 'viral_content',
+                'match_count': 10
+            }
+        ).execute()
+        
+        if not response.data:
             return "No relevant viral posts found for this topic using the vector database."
         
         results = []
-        for i, doc in enumerate(retrieved_docs[:3]): # Limit to top 3 for conciseness
-            result_text = f"Viral Post Example {i+1}:\nPage Content: {doc.page_content}\n"
-            if doc.metadata:
-                result_text += f"Source: {doc.metadata.get('source', 'N/A')}, Views: {doc.metadata.get('views', 'N/A')}, Reactions: {doc.metadata.get('reactions', 'N/A')}\n"
+        for i, doc in enumerate(response.data[:3]): # Limit to top 3 for conciseness
+            content = doc.get('data', {}).get('content', 'No content available')
+            similarity = doc.get('similarity', 0)
+            
+            result_text = f"Viral Post Example {i+1}:\nContent: {content}\n"
+            result_text += f"Similarity Score: {similarity:.3f}\n"
+            
+            # Add metadata if available
+            metadata_fields = []
+            if 'views' in doc and doc['views'] is not None:
+                metadata_fields.append(f"Views: {doc['views']}")
+            if 'reactions' in doc and doc['reactions'] is not None:
+                metadata_fields.append(f"Reactions: {doc['reactions']}")
+            if 'source' in doc and doc['source'] is not None:
+                metadata_fields.append(f"Source: {doc['source']}")
+            
+            if metadata_fields:
+                result_text += f"Metadata: {', '.join(metadata_fields)}\n"
+            
             results.append(result_text)
         
         return "\n---\n".join(results) if results else "No relevant viral posts found after formatting."
@@ -131,73 +160,57 @@ def search_linkedin_posts(query: str) -> str:
         return f"Error retrieving viral posts: {str(e)}"
 
 
-# Add the PDF document search tool
+# Add the PDF document search tool using Supabase
 @mcp.tool()
 def search_document_library(query: str) -> str:
     """
-    Search the internal PDF document library using an embedding-based retriever.
+    Search the internal PDF document library using Supabase vector similarity search.
     query (str): The topic or keywords to search for in the documents.
     Returns: str: Formatted text segments from relevant documents, or a message if no documents are found.
     """
     print(f"MCP Tool: Searching document library with query: '{query}'")
+    
     if shared_embeddings is None:
         return "Error: Embeddings model not available for document library search."
     
-    max_retries = 2
-    for attempt in range(max_retries):
-        try:
-            pdf_vector_store = Chroma(
-                collection_name="pdf_text_content",
-                persist_directory=DB_LOCATION,
-                embedding_function=shared_embeddings
-            )
-            retriever = pdf_vector_store.as_retriever(search_kwargs={"k": 5})
-            retrieved_docs = retriever.invoke(query)
-            
-            if not retrieved_docs:
-                return "No relevant documents found in the library for this topic."
-            
-            results = []
-            # Limit to top 3 for conciseness in the MCP tool response
-            for i, doc in enumerate(retrieved_docs[:3]): 
-                result_text = f"Document Segment {i+1}:\n"
-                if doc.metadata and doc.metadata.get('source_filename'):
-                    result_text += f"Source PDF: {doc.metadata['source_filename']}\n"
-                    
-                    # Add chunk information if available
-                    if doc.metadata.get('chunk_index') is not None:
-                        chunk_idx = doc.metadata.get('chunk_index')
-                        total_chunks = doc.metadata.get('total_chunks', '?')
-                        result_text += f"Chunk: {chunk_idx + 1} of {total_chunks}\n"
-                        
-                    if doc.metadata.get('chunk_size'):
-                        result_text += f"Chunk Size: {doc.metadata['chunk_size']} chars\n"
-                else:
-                    result_text += "Source PDF: Unknown\n"
-                    
-                result_text += f"Content: {doc.page_content}\n"  # Return full content instead of snippet
-                results.append(result_text)
-            
-            return "\n---\n".join(results) if results else "No relevant document segments found after formatting."
-
-        except Exception as e:
-            error_str = str(e).lower()
-            print(f"Error in MCP search_document_library tool (attempt {attempt + 1}): {e}")
-            
-            # Check for specific HNSW index errors
-            if "nothing found on disk" in error_str or "hnsw" in error_str:
-                if attempt < max_retries - 1:
-                    print(f"HNSW index error detected, retrying... (attempt {attempt + 1}/{max_retries})")
-                    import time
-                    time.sleep(0.5)  # Brief delay before retry
-                    continue
-                else:
-                    return "Error: Vector database index is temporarily unavailable. Please try uploading PDFs again or contact support if the issue persists."
-            else:
-                # For other errors, don't retry
-                break
+    if supabase is None:
+        return "Error: Supabase client not available for document library search."
     
-    return f"Error retrieving documents from library: {str(e)}"
+    try:
+        # Generate embedding for the query
+        query_embedding = shared_embeddings.embed_query(query)
+        
+        # Use generic search function with table name parameter
+        response = supabase.rpc(
+            'search_similar_vectors',
+            {
+                'query_embedding': query_embedding,
+                'table_name': 'internal_documents',
+                'match_count': 5
+            }
+        ).execute()
+        
+        if not response.data:
+            return "No relevant documents found in the library for this topic."
+        
+        results = []
+        for i, doc in enumerate(response.data[:3]): 
+            content = doc.get('data', {}).get('content', 'No content available')
+            file_url = doc.get('data', {}).get('file_url', 'No URL available')
+            similarity = doc.get('similarity', 0)
+            
+            result_text = f"Document Segment {i+1}:\n"
+            result_text += f"File URL: {file_url}\n"
+            result_text += f"Similarity Score: {similarity:.3f}\n"
+            result_text += f"Content: {content}\n"
+            
+            results.append(result_text)
+        
+        return "\n---\n".join(results) if results else "No relevant document segments found after formatting."
+
+    except Exception as e:
+        print(f"Error in MCP search_document_library tool: {e}")
+        return f"Error retrieving documents from library: {str(e)}"
 
 
 # Add the web search tool using Linkup
@@ -243,7 +256,7 @@ def web_search(query: str) -> str:
                 content = getattr(result, 'content', '') or getattr(result, 'snippet', '') or 'No content available'
                 
                 formatted_result = (
-                    f"Web Result {i+1}:\n"
+                    f"  Web Result {i+1}:\n"
                     f"  Title: {title}\n"
                     f"  URL: {url}\n"
                     f"  Content: {content[:500]}{'...' if len(content) > 500 else ''}"
@@ -297,15 +310,10 @@ def generate_image(prompt: str, style: str = "professional", aspect_ratio: str =
         
         # Enhance prompt with style guidelines
         style_enhancements = {
-            "professional": "professional, clean, business-appropriate, high-quality",
-            "infographic": "infographic style, data visualization, charts, clean design, informative",
-            "modern": "modern, contemporary, sleek design, trendy",
-            "minimalist": "minimalist, simple, clean lines, uncluttered, elegant",
-            "tech-focused": "technology-focused, digital, innovation, high-tech, futuristic",
-            "corporate": "corporate, business, professional, formal, enterprise"
+            "The image should not contain any words."
         }
         
-        enhanced_prompt = f"{prompt}. Style: {style_enhancements.get(style, 'professional')}"
+        enhanced_prompt = f"{prompt}. Note: {style_enhancements}"
         
         # Generate image using gpt-image-1 (returns base64 by default)
         response = client.images.generate(
