@@ -5,7 +5,7 @@ from typing import Optional, Dict, Any
 import asyncio
 import json
 import logging
-from ...agent.orchestrator import generate_post_for_prompt
+from backend.agent.orchestrator import generate_post_for_prompt
 
 router = APIRouter()
 
@@ -28,6 +28,7 @@ class StreamMessage(BaseModel):
     message: str
     timestamp: Optional[str] = None
 
+
 @router.post("/generate", response_model=QueryResponse)
 async def generate_content(request: QueryRequest):
     """
@@ -37,13 +38,32 @@ async def generate_content(request: QueryRequest):
     import time
     start_time = time.time()
     
+    # Capture logs during generation
+    captured_logs = []
+    
+    async def log_callback(message: str):
+        """Callback to capture logs during generation"""
+        captured_logs.append(message)
+        logger.info(f"Generation log: {message}")
+    
     try:
         logger.info(f"Processing query: {request.prompt[:100]}...")
         
-        # Call the orchestrator to generate content
-        result = await generate_post_for_prompt(request.prompt)
+        # Call the orchestrator to generate content with log capture
+        result = await generate_post_for_prompt(request.prompt, async_log_callback=log_callback)
         
         execution_time = time.time() - start_time
+        
+        # Include logs in the response
+        if isinstance(result, dict):
+            result['logs'] = captured_logs
+        else:
+            # If result is not a dict, wrap it
+            result = {
+                'post_content': result,
+                'generated_images': [],
+                'logs': captured_logs
+            }
         
         return QueryResponse(
             success=True,
@@ -68,44 +88,108 @@ async def generate_content_stream(request: QueryRequest):
     Provides real-time updates on the generation process.
     """
     async def event_generator():
-        logs_buffer = []
+        import datetime
+        import asyncio
+        import queue
+        
+        # Create a queue to capture logs from the callback
+        log_queue = asyncio.Queue()
         
         async def log_callback(message: str):
             """Callback to capture logs during generation"""
-            import datetime
             timestamp = datetime.datetime.now().isoformat()
             
-            log_entry = StreamMessage(
-                type="log",
-                message=message,
-                timestamp=timestamp
-            )
+            log_entry = {
+                "type": "log",
+                "message": message,
+                "timestamp": timestamp
+            }
             
-            # Add to buffer and yield
-            logs_buffer.append(log_entry.dict())
-            yield f"data: {json.dumps(log_entry.dict())}\n\n"
+            # Put the log message in the queue
+            await log_queue.put(log_entry)
+        
+        async def process_generation():
+            """Run the generation in a separate task"""
+            try:
+                # Add timeout to the entire generation process (5 minutes)
+                result = await asyncio.wait_for(
+                    generate_post_for_prompt(request.prompt, async_log_callback=log_callback),
+                    timeout=300.0
+                )
+                # Send final result
+                final_response = {
+                    'type': 'result', 
+                    'content': result, 
+                    'message': 'Content generation completed'
+                }
+                await log_queue.put(final_response)
+            except asyncio.TimeoutError:
+                logger.error("Generation process timed out after 5 minutes")
+                error_message = {
+                    "type": "error", 
+                    "message": "Generation process timed out. Please try again."
+                }
+                await log_queue.put(error_message)
+            except Exception as e:
+                logger.error(f"Error in streaming generation: {str(e)}")
+                error_message = {
+                    "type": "error", 
+                    "message": f"Error: {str(e)}"
+                }
+                await log_queue.put(error_message)
+            finally:
+                # Signal end of generation
+                await log_queue.put({"type": "end", "message": "Stream ended"})
         
         try:
             # Send initial message
             yield f"data: {json.dumps({'type': 'progress', 'message': 'Starting content generation...'})}\n\n"
             
-            # Call the orchestrator with streaming callback
-            result = await generate_post_for_prompt(request.prompt, log_callback)
+            # Start the generation task
+            generation_task = asyncio.create_task(process_generation())
             
-            # Send final result
-            final_message = StreamMessage(
-                type="result",
-                message="Content generation completed",
-            )
-            yield f"data: {json.dumps({'type': 'result', 'content': result, 'message': 'Content generation completed'})}\n\n"
+            # Stream logs as they come in
+            stream_start_time = asyncio.get_event_loop().time()
+            max_stream_duration = 360.0  # 6 minutes total timeout
             
+            while True:
+                try:
+                    # Check for overall timeout
+                    if asyncio.get_event_loop().time() - stream_start_time > max_stream_duration:
+                        await log_queue.put({
+                            "type": "error", 
+                            "message": "Stream timeout - generation took too long"
+                        })
+                        break
+                    
+                    # Wait for next log message with timeout
+                    log_entry = await asyncio.wait_for(log_queue.get(), timeout=1.0)
+                    
+                    # Send the log message
+                    yield f"data: {json.dumps(log_entry)}\n\n"
+                    
+                    # Check if this is the end signal
+                    if log_entry.get('type') == 'end':
+                        break
+                        
+                except asyncio.TimeoutError:
+                    # Check if generation is still running
+                    if generation_task.done():
+                        break
+                    # Send keep-alive
+                    yield f"data: {json.dumps({'type': 'keepalive', 'message': 'Processing...'})}\n\n"
+            
+            # Ensure generation task completes
+            if not generation_task.done():
+                await generation_task
+                
         except Exception as e:
             logger.error(f"Error in streaming generation: {str(e)}")
-            error_message = StreamMessage(
-                type="error",
-                message=f"Error: {str(e)}"
-            )
-            yield f"data: {json.dumps(error_message.dict())}\n\n"
+            error_message = {
+                "type": "error",
+                "message": f"Error: {str(e)}"
+            }
+            yield f"data: {json.dumps(error_message)}\n\n"
         
         finally:
             # Send end signal
@@ -113,7 +197,7 @@ async def generate_content_stream(request: QueryRequest):
     
     return StreamingResponse(
         event_generator(),
-        media_type="text/plain",
+        media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
@@ -128,8 +212,8 @@ async def get_query_status():
     """
     try:
         # Test if we can import and access the orchestrator
-        from ...agent.orchestrator import generate_post_for_prompt
-        from ...services.openai_service import initialize_llm
+        from backend.agent.orchestrator import generate_post_for_prompt
+        from backend.services.openai_service import initialize_llm
         
         # Try to initialize LLM to check if services are available
         llm = initialize_llm()

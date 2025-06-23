@@ -2,7 +2,7 @@ from fastapi import APIRouter, File, UploadFile, HTTPException, status
 from fastapi.responses import JSONResponse
 from typing import List, Optional
 import io
-from ...infra.pdf_uploader import process_and_add_pdf
+from backend.infra.pdf_uploader import process_and_add_pdf
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -136,7 +136,7 @@ async def health_check():
     """
     try:
         # Test vector store initialization
-        from ...infra.pdf_uploader import _initialize_vector_store
+        from backend.infra.pdf_uploader import _initialize_vector_store
         _initialize_vector_store()
         return {"status": "healthy", "service": "internal_documents"}
     except Exception as e:

@@ -29,7 +29,7 @@ async def gather_information(user_prompt_text: str, llm, async_log_callback=None
     
     # Bind information gathering tools including web search
     llm_with_info_tools = llm.bind_tools(
-        [search_document_library_mcp_tool_def, search_recent_news_mcp_tool_def, web_search_mcp_tool_def],
+        [search_document_library_mcp_tool_def, web_search_mcp_tool_def],
         tool_choice="auto"
     )
     

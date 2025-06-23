@@ -35,50 +35,48 @@ def _initialize_embeddings():
             raise ConnectionError(f"Failed to initialize OllamaEmbeddings for '{EMBEDDINGS_MODEL_NAME}': {e}. Ensure Ollama is running.")
     return embeddings_model_instance
 
-def _upload_pdf_to_storage(pdf_bytes: bytes, filename: str, tenant_id: str = None) -> tuple[str | None, str | None]:
+def _upload_pdf_to_storage(pdf_bytes: bytes, filename: str, document_uuid: str, tenant_id: str = None) -> tuple[bool, str | None]:
     """
-    Upload PDF to Supabase storage bucket in a tenant-specific folder.
+    Upload PDF to Supabase storage bucket using document UUID as filename.
     
     Args:
         pdf_bytes (bytes): PDF file bytes
-        filename (str): Original filename
+        filename (str): Original filename (for extension)
+        document_uuid (str): UUID from database to use as filename
         tenant_id (str, optional): Tenant ID for folder organization
         
     Returns:
-        tuple[str | None, str | None]: (file_url, error_message)
+        tuple[bool, str | None]: (success, error_message)
     """
     try:
         # Use provided tenant_id or default
         current_tenant_id = tenant_id or TENANT_ID
         
-        # Generate unique filename to avoid conflicts
+        # Use document UUID as filename with original extension
         file_extension = os.path.splitext(filename)[1]
-        unique_filename = f"{uuid.uuid4()}{file_extension}"
+        storage_filename = f"{document_uuid}{file_extension}"
         
         # Create tenant-specific path
-        tenant_folder_path = f"{current_tenant_id}/{unique_filename}"
+        storage_path = f"{current_tenant_id}/{storage_filename}"
         
-        print(f"[pdf_uploader DEBUG] Uploading {filename} as {unique_filename} to bucket '{STORAGE_BUCKET}' in folder '{current_tenant_id}'")
+        print(f"[pdf_uploader DEBUG] Uploading {filename} as {storage_filename} to bucket '{STORAGE_BUCKET}' in folder '{current_tenant_id}'")
         
         # Upload file to storage with tenant folder path
         response = supabase.storage.from_(STORAGE_BUCKET).upload(
-            path=tenant_folder_path,
+            path=storage_path,
             file=pdf_bytes,
             file_options={"content-type": "application/pdf"}
         )
         
         if hasattr(response, 'error') and response.error:
-            return None, f"Storage upload error: {response.error}"
+            return False, f"Storage upload error: {response.error}"
         
-        # Get public URL with the full path
-        file_url = supabase.storage.from_(STORAGE_BUCKET).get_public_url(tenant_folder_path)
-        
-        print(f"[pdf_uploader DEBUG] Successfully uploaded to: {file_url}")
-        return file_url, None
+        print(f"[pdf_uploader DEBUG] Successfully uploaded to storage path: {storage_path}")
+        return True, None
         
     except Exception as e:
         print(f"[pdf_uploader ERROR] Failed to upload PDF to storage: {e}")
-        return None, f"Failed to upload PDF to storage: {e}"
+        return False, f"Failed to upload PDF to storage: {e}"
 
 def _extract_text_from_pdf_bytes(pdf_bytes: bytes) -> tuple[str | None, str | None]:
     """Extracts text from PDF bytes. Returns (text, error_message)."""
@@ -194,29 +192,48 @@ def _generate_embeddings_for_chunks(chunks: list[Document]) -> list[list[float]]
         print(f"[pdf_uploader ERROR] Failed to generate embeddings: {e}")
         raise e
 
-def _insert_chunks_to_database(chunks: list[Document], embeddings: list[list[float]], file_url: str, original_filename: str, tenant_id: str) -> tuple[bool, str]:
+def _insert_chunks_to_database(chunks: list[Document], embeddings: list[list[float]], original_filename: str, tenant_id: str) -> tuple[bool, str, str | None]:
     """
     Insert chunks and their embeddings into the internal_documents table.
     
     Args:
         chunks (list[Document]): List of document chunks
         embeddings (list[list[float]]): List of embedding vectors
-        file_url (str): URL of the uploaded PDF file
         original_filename (str): Original filename
         tenant_id (str): Tenant ID for the document
         
     Returns:
-        tuple[bool, str]: (success, message)
+        tuple[bool, str, str | None]: (success, message, document_uuid)
     """
     try:
         print(f"[pdf_uploader DEBUG] Inserting {len(chunks)} chunks into database")
+        
+        # Generate a unique UUID for all chunks of this document
+        # Include collision detection (though UUID4 collisions are astronomically unlikely)
+        max_attempts = 5
+        document_uuid = None
+        
+        for attempt in range(max_attempts):
+            candidate_uuid = str(uuid.uuid4())
+            
+            # Check if this UUID already exists in the database
+            existing_check = supabase.table("internal_documents").select("id").eq("document_id", candidate_uuid).limit(1).execute()
+            
+            if not existing_check.data:  # UUID is unique
+                document_uuid = candidate_uuid
+                break
+            else:
+                print(f"[pdf_uploader DEBUG] UUID collision detected on attempt {attempt + 1}, generating new UUID")
+        
+        if not document_uuid:
+            return False, "Failed to generate unique UUID after multiple attempts", None
         
         # Prepare data for batch insert
         insert_data = []
         for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
             row = {
                 "tenant_id": tenant_id,
-                "file_url": file_url,
+                "document_id": document_uuid,  # All chunks share the same UUID
                 "file_name": original_filename,
                 "content": chunk.page_content,
                 "embedding": embedding,
@@ -233,14 +250,14 @@ def _insert_chunks_to_database(chunks: list[Document], embeddings: list[list[flo
         response = supabase.table("internal_documents").insert(insert_data).execute()
         
         if hasattr(response, 'error') and response.error:
-            return False, f"Database insert error: {response.error}"
+            return False, f"Database insert error: {response.error}", None
         
-        print(f"[pdf_uploader DEBUG] Successfully inserted {len(insert_data)} chunks into database")
-        return True, f"Successfully inserted {len(insert_data)} chunks into database"
+        print(f"[pdf_uploader DEBUG] Successfully inserted {len(insert_data)} chunks into database with UUID: {document_uuid}")
+        return True, f"Successfully inserted {len(insert_data)} chunks into database", document_uuid
         
     except Exception as e:
         print(f"[pdf_uploader ERROR] Failed to insert chunks into database: {e}")
-        return False, f"Failed to insert chunks into database: {e}"
+        return False, f"Failed to insert chunks into database: {e}", None
 
 def _check_existing_document(filename: str) -> tuple[bool, int]:
     """
@@ -253,7 +270,7 @@ def _check_existing_document(filename: str) -> tuple[bool, int]:
         tuple[bool, int]: (exists, chunk_count)
     """
     try:
-        response = supabase.table("internal_documents").select("id").eq("metadata->>source_filename", filename).execute()
+        response = supabase.table("internal_documents").select("id").eq("file_name", filename).execute()
         
         if hasattr(response, 'error') and response.error:
             print(f"[pdf_uploader WARNING] Error checking existing document: {response.error}")
@@ -312,18 +329,22 @@ def process_and_add_pdf(pdf_bytes: bytes, original_filename: str, tenant_id: str
     except Exception as e:
         return False, f"Failed to generate embeddings: {e}"
     
-    # Upload PDF to storage (only after everything else is ready)
-    file_url, upload_error = _upload_pdf_to_storage(pdf_bytes, original_filename, current_tenant_id)
-    if upload_error:
+    # Insert chunks and embeddings into database FIRST to get the document UUID
+    success, message, document_uuid = _insert_chunks_to_database(chunked_documents, embeddings, original_filename, current_tenant_id)
+    if not success or not document_uuid:
+        return False, message
+    
+    # Upload PDF to storage using the document UUID as filename
+    upload_success, upload_error = _upload_pdf_to_storage(pdf_bytes, original_filename, document_uuid, current_tenant_id)
+    if not upload_success:
+        # Clean up database entries if storage upload fails
+        try:
+            supabase.table("internal_documents").delete().eq("document_id", document_uuid).execute()
+        except:
+            pass  # Don't fail the whole operation if cleanup fails
         return False, upload_error
     
-    # Insert chunks and embeddings into database
-    success, message = _insert_chunks_to_database(chunked_documents, embeddings, file_url, original_filename, current_tenant_id)
-    
-    if success:
-        return True, f"File '{original_filename}' processed and added to database as {len(chunked_documents)} chunks."
-    else:
-        return False, message
+    return True, f"File '{original_filename}' processed and added to database as {len(chunked_documents)} chunks."
 
 def extract_text_from_pdf(pdf_path):
     """

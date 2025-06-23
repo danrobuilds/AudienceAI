@@ -1,6 +1,5 @@
 from fastapi import FastAPI
-from api.routes import chat, tools, user_queries
-from backend.api.routes import uploads
+from backend.api.routes import user_queries, uploads
 
 app = FastAPI()
 

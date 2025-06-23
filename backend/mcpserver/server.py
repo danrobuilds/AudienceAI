@@ -23,6 +23,43 @@ SERVER_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # DB_LOCATION will be backend/local_embeddings_db/
 DB_LOCATION = os.path.join(SERVER_SCRIPT_DIR, "..", "local_embeddings_db")
 
+# Storage configuration for signed URL generation
+STORAGE_BUCKET = "files"
+
+def generate_signed_url_for_document(document_uuid: str, tenant_id: str, filename: str, expiry_seconds: int = 3600) -> tuple[str | None, str | None]:
+    """
+    Generate a signed URL for a document using its UUID.
+    
+    Args:
+        document_uuid (str): The document UUID
+        tenant_id (str): Tenant ID
+        filename (str): Original filename (for extension)
+        expiry_seconds (int): URL expiry time in seconds
+        
+    Returns:
+        tuple[str | None, str | None]: (signed_url, error_message)
+    """
+    try:
+        # Construct storage path
+        file_extension = os.path.splitext(filename)[1]
+        storage_path = f"{tenant_id}/{document_uuid}{file_extension}"
+        
+        response = supabase.storage.from_(STORAGE_BUCKET).create_signed_url(
+            path=storage_path,
+            expires_in=expiry_seconds
+        )
+        
+        if hasattr(response, 'error') and response.error:
+            return None, f"Failed to create signed URL: {response.error}"
+        
+        # Extract the signed URL from the response
+        signed_url = response.get('signedURL') if hasattr(response, 'get') else response
+        
+        return signed_url, None
+        
+    except Exception as e:
+        return None, f"Failed to generate signed URL: {e}"
+
 # Initialize embeddings model once
 try:
     shared_embeddings = OllamaEmbeddings(model="nomic-embed-text")
@@ -118,12 +155,11 @@ def search_linkedin_posts(query: str) -> str:
         # Generate embedding for the query
         query_embedding = shared_embeddings.embed_query(query)
         
-        # Use generic search function with table name parameter
+        # Use specific RPC function for viral content search
         response = supabase.rpc(
-            'search_similar_vectors',
+            'search_viral_content',
             {
                 'query_embedding': query_embedding,
-                'table_name': 'viral_content',
                 'match_count': 10
             }
         ).execute()
@@ -133,7 +169,7 @@ def search_linkedin_posts(query: str) -> str:
         
         results = []
         for i, doc in enumerate(response.data[:3]): # Limit to top 3 for conciseness
-            content = doc.get('data', {}).get('content', 'No content available')
+            content = doc.get('content', 'No content available')
             similarity = doc.get('similarity', 0)
             
             result_text = f"Viral Post Example {i+1}:\nContent: {content}\n"
@@ -149,7 +185,7 @@ def search_linkedin_posts(query: str) -> str:
                 metadata_fields.append(f"Source: {doc['source']}")
             
             if metadata_fields:
-                result_text += f"Metadata: {', '.join(metadata_fields)}\n"
+                result_text += f"{', '.join(metadata_fields)}\n"
             
             results.append(result_text)
         
@@ -180,12 +216,11 @@ def search_document_library(query: str) -> str:
         # Generate embedding for the query
         query_embedding = shared_embeddings.embed_query(query)
         
-        # Use generic search function with table name parameter
+        # Use specific RPC function for document search
         response = supabase.rpc(
-            'search_similar_vectors',
+            'search_internal_documents', 
             {
                 'query_embedding': query_embedding,
-                'table_name': 'internal_documents',
                 'match_count': 5
             }
         ).execute()
@@ -194,17 +229,56 @@ def search_document_library(query: str) -> str:
             return "No relevant documents found in the library for this topic."
         
         results = []
-        for i, doc in enumerate(response.data[:3]): 
-            content = doc.get('data', {}).get('content', 'No content available')
-            file_url = doc.get('data', {}).get('file_url', 'No URL available')
+        # Track which source files we've found and their UUIDs for signed URL generation
+        source_files = set()
+        document_urls = {}  # Store unique documents and their signed URLs
+        
+        for i, doc in enumerate(response.data[:5]): 
+            content = doc.get('content', 'No content available')
+            filename = doc.get('file_name', doc.get('source_filename', 'Unknown file'))
+            document_id = doc.get('document_id')
+            tenant_id = doc.get('tenant_id')
             similarity = doc.get('similarity', 0)
             
+            # Add to source files set
+            source_files.add(filename)
+            
+            # Generate signed URL for this document if we haven't already
+            if document_id and tenant_id and filename not in document_urls:
+                try:
+                    signed_url, error = generate_signed_url_for_document(
+                        document_uuid=document_id,
+                        tenant_id=tenant_id,
+                        filename=filename,
+                        expiry_seconds=3600  # 1 hour expiry
+                    )
+                    
+                    if signed_url:
+                        document_urls[filename] = signed_url
+                    else:
+                        print(f"[MCP WARNING] Failed to generate signed URL for {filename}: {error}")
+                        
+                except Exception as e:
+                    print(f"[MCP WARNING] Could not generate signed URL for {filename}: {e}")
+            
             result_text = f"Document Segment {i+1}:\n"
-            result_text += f"File URL: {file_url}\n"
+            result_text += f"Source PDF: {filename}\n"
             result_text += f"Similarity Score: {similarity:.3f}\n"
             result_text += f"Content: {content}\n"
             
             results.append(result_text)
+        
+        # Add signed URLs section if any were generated
+        if document_urls:
+            url_section = "\nDocument Access URLs (valid for 1 hour):\n"
+            for filename, signed_url in document_urls.items():
+                url_section += f"• {filename}: {signed_url}\n"
+            results.append(url_section)
+        
+        # Add a summary of source files used
+        if source_files:
+            source_summary = f"\nSource PDFs used:\n" + "\n".join([f"• {file}" for file in sorted(source_files)])
+            results.append(source_summary)
         
         return "\n---\n".join(results) if results else "No relevant document segments found after formatting."
 
