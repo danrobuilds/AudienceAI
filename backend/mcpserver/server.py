@@ -1,7 +1,7 @@
 from mcp.server.fastmcp import FastMCP
 from dotenv import load_dotenv
 from langchain_core.documents import Document
-from .news import get_news
+from mcpserver.news import get_news
 import os # Added for path manipulation
 from langchain_ollama import OllamaEmbeddings # Added
 from langchain_chroma import Chroma # Added

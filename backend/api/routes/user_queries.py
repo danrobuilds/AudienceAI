@@ -5,7 +5,7 @@ from typing import Optional, Dict, Any
 import asyncio
 import json
 import logging
-from backend.agent.orchestrator import generate_post_for_prompt
+from agent.orchestrator import generate_post_for_prompt
 
 router = APIRouter()
 
@@ -212,8 +212,8 @@ async def get_query_status():
     """
     try:
         # Test if we can import and access the orchestrator
-        from backend.agent.orchestrator import generate_post_for_prompt
-        from backend.services.openai_service import initialize_llm
+        from agent.orchestrator import generate_post_for_prompt
+        from services.openai_service import initialize_llm
         
         # Try to initialize LLM to check if services are available
         llm = initialize_llm()

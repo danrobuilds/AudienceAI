@@ -3,12 +3,12 @@ import os
 import sys
 import uvicorn
 
-# Add project root to Python path to fix relative imports
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, project_root)
+# Add current directory to Python path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, current_dir)
 
-# Now import with correct path structure
-from backend.api.main import app
+# Import with consistent path since we always run from backend directory
+from api.main import app
 
 async def start_api():
     """Start the FastAPI server with async-compatible configuration"""
@@ -26,15 +26,25 @@ async def start_mcp():
     """Start the MCP server using async subprocess"""
     import subprocess
     
-    # Use subprocess to run MCP server as separate process
-    mcp_process = await asyncio.create_subprocess_exec(
-        sys.executable, "-m", "backend.mcpserver",
-        cwd=project_root,  # Run from project root
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
-    )
+    # Try different module paths for MCP server
+    mcp_module_options = ["mcpserver", "backend.mcpserver"]
     
-    print(f"MCP Server started with PID: {mcp_process.pid}")
+    for module_path in mcp_module_options:
+        try:
+            # Use subprocess to run MCP server as separate process
+            mcp_process = await asyncio.create_subprocess_exec(
+                sys.executable, "-m", module_path,
+                cwd=current_dir if module_path == "mcpserver" else current_dir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            print(f"MCP Server started with PID: {mcp_process.pid} using module: {module_path}")
+            break
+        except Exception as e:
+            print(f"Failed to start MCP server with {module_path}: {e}")
+            if module_path == mcp_module_options[-1]:  # Last attempt failed
+                raise
     
     # Monitor the process
     try:

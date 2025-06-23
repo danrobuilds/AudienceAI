@@ -1,7 +1,7 @@
 import asyncio
-from ..services.openai_service import initialize_llm
-from .agent_info_gatherer import gather_information
-from .agent_post_creator import create_viral_post
+from services.openai_service import initialize_llm
+from agent.agent_info_gatherer import gather_information
+from agent.agent_post_creator import create_viral_post
 
 async def generate_post_for_prompt(user_prompt_text: str, async_log_callback: callable = None):
     """
