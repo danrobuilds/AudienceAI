@@ -1,6 +1,6 @@
 import os
 import pandas as pd
-from langchain_ollama import OllamaEmbeddings
+from langchain_nomic import NomicEmbeddings
 import sys
 
 # Add the parent directory to the path to import services
@@ -15,8 +15,21 @@ CSV_PATH = os.path.join(SCRIPT_DIR, "influencers_data_filtered.csv")
 # Load the CSV data
 df = pd.read_csv(CSV_PATH)
 
-# Initialize embeddings model
-embeddings = OllamaEmbeddings(model="nomic-embed-text")
+# Initialize embeddings model with Nomic remote API
+print("Initializing NomicEmbeddings with remote API...")
+try:
+    embeddings = NomicEmbeddings(
+        model="nomic-embed-text-v1.5",
+        inference_mode="remote",  # Use remote API
+        dimensionality=768,  # Full dimensionality for best performance
+        # The API key should be set as NOMIC_API_KEY environment variable
+    )
+    print("Successfully initialized NomicEmbeddings with remote API")
+except Exception as e:
+    print(f"CRITICAL: Failed to initialize NomicEmbeddings: {e}")
+    print("Ensure NOMIC_API_KEY is set in your environment variables.")
+    print("Get your API key from https://atlas.nomic.ai/")
+    raise e
 
 # Check if viral_content table already has data
 print("Checking if viral_content table has existing data...")

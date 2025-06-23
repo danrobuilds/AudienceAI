@@ -5,13 +5,13 @@ import os
 import io
 import uuid
 from datetime import datetime
-from langchain_ollama import OllamaEmbeddings
+from langchain_nomic import NomicEmbeddings
 from langchain_core.documents import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from services.supabase_service import supabase
 
 # --- Constants ---
-EMBEDDINGS_MODEL_NAME = "nomic-embed-text"
+EMBEDDINGS_MODEL_NAME = "nomic-embed-text-v1.5"
 STORAGE_BUCKET = "files"
 TENANT_ID = "2e916cd6-d890-4127-afe0-6e3dde85bddc"  # Dummy tenant ID for now
 
@@ -27,12 +27,16 @@ def _initialize_embeddings():
     global embeddings_model_instance
     if embeddings_model_instance is None:
         try:
-            print(f"[pdf_uploader DEBUG] Initializing OllamaEmbeddings model: {EMBEDDINGS_MODEL_NAME}")
-            embeddings_model_instance = OllamaEmbeddings(model=EMBEDDINGS_MODEL_NAME)
-            print("[pdf_uploader DEBUG] OllamaEmbeddings initialized.")
+            print(f"[pdf_uploader DEBUG] Initializing NomicEmbeddings model: {EMBEDDINGS_MODEL_NAME}")
+            embeddings_model_instance = NomicEmbeddings(
+                model=EMBEDDINGS_MODEL_NAME,
+                inference_mode="remote",
+                dimensionality=768,
+            )
+            print("[pdf_uploader DEBUG] NomicEmbeddings initialized successfully with remote API")
         except Exception as e:
-            print(f"[pdf_uploader ERROR] Failed to initialize OllamaEmbeddings: {e}")
-            raise ConnectionError(f"Failed to initialize OllamaEmbeddings for '{EMBEDDINGS_MODEL_NAME}': {e}. Ensure Ollama is running.")
+            print(f"[pdf_uploader ERROR] Failed to initialize NomicEmbeddings: {e}")
+            raise ConnectionError(f"Failed to initialize NomicEmbeddings for '{EMBEDDINGS_MODEL_NAME}': {e}. Ensure NOMIC_API_KEY is set in your environment variables.")
     return embeddings_model_instance
 
 def _upload_pdf_to_storage(pdf_bytes: bytes, filename: str, document_uuid: str, tenant_id: str = None) -> tuple[bool, str | None]:

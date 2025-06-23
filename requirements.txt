@@ -3,6 +3,7 @@ uvicorn[standard]
 pydantic
 python-dotenv
 langchain 
+langchain-openai
 langchain-ollama 
 langchain-chroma
 langchain-core

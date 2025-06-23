@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from langchain_core.documents import Document
 from mcpserver.news import get_news
 import os # Added for path manipulation
-from langchain_ollama import OllamaEmbeddings # Added
+from langchain_nomic import NomicEmbeddings # Changed from OllamaEmbeddings
 from langchain_chroma import Chroma # Added
 from linkup import LinkupClient # Added for web search
 from openai import OpenAI # Added for image generation
@@ -62,10 +62,18 @@ def generate_signed_url_for_document(document_uuid: str, tenant_id: str, filenam
 
 # Initialize embeddings model once
 try:
-    shared_embeddings = OllamaEmbeddings(model="nomic-embed-text")
+    # Use Nomic's remote API instead of local Ollama
+    shared_embeddings = NomicEmbeddings(
+        model="nomic-embed-text-v1.5",
+        inference_mode="remote",  # Use remote API
+        dimensionality=768,  # Full dimensionality for best performance
+        # The API key should be set as NOMIC_API_KEY environment variable
+    )
+    print("Successfully initialized NomicEmbeddings with remote API")
 except Exception as e:
-    print(f"CRITICAL: Failed to initialize OllamaEmbeddings in server.py: {e}")
-    print("Ensure Ollama is running and the model 'nomic-embed-text' is available.")
+    print(f"CRITICAL: Failed to initialize NomicEmbeddings in server.py: {e}")
+    print("Ensure NOMIC_API_KEY is set in your environment variables.")
+    print("Get your API key from https://atlas.nomic.ai/")
     # Depending on desired behavior, you might exit or disable tools that need embeddings
     shared_embeddings = None # Set to None so tools can check and fail gracefully
 
