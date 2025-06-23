@@ -8,6 +8,7 @@ langchain-ollama
 langchain-chroma
 langchain-core
 langchain-community
+langchain-nomic
 ollama
 pandas
 numpy
