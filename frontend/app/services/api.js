@@ -6,7 +6,10 @@ const getApiBaseUrl = () => {
   // In production, require the environment variable to be set
   if (process.env.NODE_ENV === 'production') {
     if (!process.env.NEXT_PUBLIC_API_URL) {
-      throw new Error('NEXT_PUBLIC_API_URL environment variable is required in production');
+      // During build time, we might not have the env var set yet
+      // Return a placeholder that will be caught at runtime
+      console.warn('NEXT_PUBLIC_API_URL environment variable is not set in production');
+      return 'https://api-not-configured.placeholder';
     }
     return process.env.NEXT_PUBLIC_API_URL;
   }
@@ -26,9 +29,14 @@ const apiClient = axios.create({
   }
 });
 
-// Request interceptor for logging
+// Request interceptor for logging and runtime validation
 apiClient.interceptors.request.use(
   (config) => {
+    // Runtime check for production API URL
+    if (process.env.NODE_ENV === 'production' && config.baseURL?.includes('api-not-configured.placeholder')) {
+      throw new Error('NEXT_PUBLIC_API_URL environment variable is required in production. Please set it in your Vercel deployment settings.');
+    }
+    
     console.log(`Making ${config.method?.toUpperCase()} request to: ${config.url}`);
     return config;
   },
