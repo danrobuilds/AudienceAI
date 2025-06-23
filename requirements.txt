@@ -19,4 +19,4 @@ beautifulsoup4
 supabase
 openai
 linkup
-mcp
+mcp 
