@@ -2,6 +2,7 @@ import asyncio
 import os
 import sys
 import uvicorn
+import time  # Added for startup delays
 
 # Add current directory to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -10,8 +11,29 @@ sys.path.insert(0, current_dir)
 # Import with consistent path since we always run from backend directory
 from api.main import app
 
+async def wait_for_mcp_server(host="127.0.0.1", port=8050, timeout=30):
+    """Wait for MCP server to be ready"""
+    import socket
+    
+    print(f"⏳ Waiting for MCP server to be ready at {host}:{port}...")
+    start_time = time.time()
+    
+    while time.time() - start_time < timeout:
+        try:
+            with socket.create_connection((host, port), timeout=1):
+                print(f"✅ MCP server is ready!")
+                return True
+        except (socket.error, ConnectionRefusedError):
+            await asyncio.sleep(1)
+    
+    print(f"❌ MCP server not ready after {timeout} seconds")
+    return False
+
 async def start_api():
     """Start the FastAPI server with async-compatible configuration"""
+    # Wait for MCP server to be ready first
+    await wait_for_mcp_server()
+    
     config = uvicorn.Config(
         app, 
         host="0.0.0.0", 
@@ -40,6 +62,9 @@ async def start_mcp():
             )
             
             print(f"MCP Server started with PID: {mcp_process.pid} using module: {module_path}")
+            
+            # Give MCP server some time to start up
+            await asyncio.sleep(3)
             break
         except Exception as e:
             print(f"Failed to start MCP server with {module_path}: {e}")
@@ -70,12 +95,18 @@ async def main():
     print(f"🔧 MCP Client will connect to: http://{os.environ.get('MCP_SERVER_HOST', '127.0.0.1')}:{os.environ.get('MCP_SERVER_PORT', '8050')}/sse")
     
     try:
-        # Start both servers concurrently
-        await asyncio.gather(
-            start_api(),
-            start_mcp(),
-            return_exceptions=True
-        )
+        # Start MCP server first, then API server with a delay
+        mcp_task = asyncio.create_task(start_mcp())
+        
+        # Wait a bit for MCP server to start
+        await asyncio.sleep(5)
+        
+        # Then start API server
+        api_task = asyncio.create_task(start_api())
+        
+        # Wait for both tasks
+        await asyncio.gather(mcp_task, api_task, return_exceptions=True)
+        
     except KeyboardInterrupt:
         print("🛑 Shutting down servers...")
     except Exception as e:

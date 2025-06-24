@@ -88,6 +88,11 @@ mcp = FastMCP(
     port=SERVER_PORT,  # Pass to FastMCP constructor
 )
 
+# Add a simple health check endpoint
+@mcp.get("/health")
+async def health_check():
+    """Health check endpoint for Railway and monitoring"""
+    return {"status": "healthy", "service": "AudienceAI MCP Server"}
 
 # Add a news search tool
 @mcp.tool()

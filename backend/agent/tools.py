@@ -1,5 +1,6 @@
 import asyncio
 import os  # Added for environment variable access
+import aiohttp  # Added for health checks
 from mcp import ClientSession
 from mcp.client.sse import sse_client
 from langchain_core.messages import ToolMessage
@@ -113,6 +114,34 @@ generate_image_mcp_tool_def = {
 
 # -------------------------- MCP TOOLS CALLING LOGIC ------------------------------------------------------------
 
+async def check_mcp_server_health(server_url: str, max_retries: int = 5) -> bool:
+    """
+    Check if MCP server is healthy and ready to accept connections.
+    
+    Args:
+        server_url: The MCP server URL
+        max_retries: Maximum number of health check attempts
+    
+    Returns:
+        bool: True if server is healthy, False otherwise
+    """
+    base_url = server_url.replace('/sse', '')  # Remove /sse endpoint for health check
+    health_url = f"{base_url}/health"  # Assuming health endpoint exists
+    
+    for attempt in range(max_retries):
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(health_url, timeout=2) as response:
+                    if response.status == 200:
+                        return True
+        except Exception:
+            pass
+        
+        if attempt < max_retries - 1:
+            await asyncio.sleep(2 ** attempt)  # Exponential backoff
+    
+    return False
+
 async def call_mcp_tools(llm_response, async_log_callback=None):
     """
     Separate function to handle MCP tool calling logic.
@@ -137,12 +166,48 @@ async def call_mcp_tools(llm_response, async_log_callback=None):
         
     await _log(f"\nLLM decided to use {len(llm_response.tool_calls)} tool(s): {[tc.get('name', 'unknown') if isinstance(tc, dict) else getattr(tc, 'name', 'unknown') for tc in llm_response.tool_calls]}")
     
+    # Check MCP server health before making calls
+    mcp_host = os.getenv("MCP_SERVER_HOST", "localhost")
+    mcp_port = os.getenv("MCP_SERVER_PORT", "8050")
+    server_url = f"http://{mcp_host}:{mcp_port}/sse"
+    
+    await _log(f"Checking MCP server health at: {server_url}")
+    
+    # Try alternative connection approaches for Railway
+    connection_attempts = [
+        f"http://127.0.0.1:{mcp_port}/sse",  # Localhost
+        f"http://0.0.0.0:{mcp_port}/sse",    # All interfaces
+        f"http://localhost:{mcp_port}/sse",   # Standard localhost
+    ]
+    
+    successful_url = None
+    for attempt_url in connection_attempts:
+        try:
+            await _log(f"Testing connection to: {attempt_url}")
+            # Simple connection test
+            async with sse_client(attempt_url) as (read_stream, write_stream):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await asyncio.wait_for(session.initialize(), timeout=5.0)
+                    successful_url = attempt_url
+                    await _log(f"Successfully connected to MCP server at: {attempt_url}")
+                    break
+        except Exception as e:
+            await _log(f"Connection failed for {attempt_url}: {e}")
+            continue
+    
+    if not successful_url:
+        await _log("All MCP server connection attempts failed. Tools will return error messages.")
+        for tool_call in llm_response.tool_calls:
+            tool_name = tool_call["name"]
+            error_content = f"MCP server connection failed. The '{tool_name}' tool is unavailable. Please proceed with available information."
+            tool_messages.append(ToolMessage(content=error_content, tool_call_id=tool_call["id"]))
+        return tool_messages
+    
+    # Use the successful URL for all tool calls
+    server_url = successful_url
+    
     for tool_call in llm_response.tool_calls:
         tool_args = tool_call["args"]
-        # Make MCP server URL configurable for Railway deployment
-        mcp_host = os.getenv("MCP_SERVER_HOST", "localhost")
-        mcp_port = os.getenv("MCP_SERVER_PORT", "8050")
-        server_url = f"http://{mcp_host}:{mcp_port}/sse"
         tool_output_content = "" 
         tool_name = tool_call["name"]
 

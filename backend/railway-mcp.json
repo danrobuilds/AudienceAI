@@ -1,0 +1,18 @@
+{
+  "name": "audienceai-mcp",
+  "description": "MCP Server for AudienceAI",
+  "build": {
+    "command": "pip install -r requirements.txt"
+  },
+  "start": {
+    "command": "python -m mcpserver"
+  },
+  "environment": {
+    "MCP_SERVER_HOST": "0.0.0.0",
+    "MCP_SERVER_PORT": "8050"
+  },
+  "healthcheck": {
+    "path": "/health",
+    "port": 8050
+  }
+} 
