@@ -19,5 +19,5 @@ pdfplumber
 beautifulsoup4
 supabase
 openai
-linkup
+linkup-sdk
 mcp 
