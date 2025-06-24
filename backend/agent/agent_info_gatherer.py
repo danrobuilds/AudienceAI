@@ -1,8 +1,7 @@
 import asyncio
 from langchain_core.messages import SystemMessage, HumanMessage
-from agent.tools import (
+from tools.tool_calling import (
     search_document_library_mcp_tool_def, 
-    search_recent_news_mcp_tool_def, 
     web_search_mcp_tool_def,
     call_mcp_tools
 )
@@ -37,10 +36,9 @@ async def gather_information(user_prompt_text: str, llm, async_log_callback=None
 
     Use the available tools to:
     1. Search the document library for relevant company/internal information
-    2. Search for recent news articles that relate to the topic
-    3. Perform general web searches for broader context and information
+    2. Perform general web searches for broader context and information (this can include recent news, market research, industry insights, trends, and other relevant web content)
 
-    Be thorough in your information gathering. Call multiple tools with different queries to get a wide range of relevant information.
+    Be thorough in your information gathering, and be efficent. Never call a single tool more than 2 times. Call multiple tools with different, but comprehensive, queries to get a wide range of relevant information.
     Your goal is to collect as much relevant context as possible, not to create the post yet.
 
     After gathering information, provide a detailed summary INCLUDING KEY FACTS AND NUMBERS of all the relevant information you found in a loose, unstructured format.
@@ -51,6 +49,10 @@ async def gather_information(user_prompt_text: str, llm, async_log_callback=None
         HumanMessage(content=f"Gather comprehensive information for creating a LinkedIn post about: {user_prompt_text}")
     ]
     
+    # Track tool call count
+    total_tool_calls = 0
+    max_tool_calls = 3  # Limit to 3 tool calls maximum
+    
     # Initial LLM call for information gathering
     try:
         await _log("Invoking LLM for information gathering...")
@@ -59,6 +61,15 @@ async def gather_information(user_prompt_text: str, llm, async_log_callback=None
         
         # Process tool calls if any
         if info_response.tool_calls:
+            tool_count = len(info_response.tool_calls)
+            total_tool_calls += tool_count
+            
+            await _log(f"LLM requesting {tool_count} tool calls (total so far: {total_tool_calls})")
+            
+            # Check if we're exceeding reasonable limits
+            if total_tool_calls > max_tool_calls:
+                await _log(f"WARNING: High number of tool calls ({total_tool_calls}). This may indicate inefficient research strategy.")
+            
             tool_messages = await call_mcp_tools(info_response, async_log_callback)
             messages.extend(tool_messages)
             
@@ -68,7 +79,7 @@ async def gather_information(user_prompt_text: str, llm, async_log_callback=None
         else:
             gathered_info = info_response.content
             
-        await _log(f"Information gathering complete. Gathered info preview: {str(gathered_info)}...")
+        await _log(f"Information gathering complete. Used {total_tool_calls} tool calls. Gathered info preview: {str(gathered_info)[:200]}...")
         return gathered_info
         
     except Exception as e:

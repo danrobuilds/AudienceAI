@@ -1,7 +1,7 @@
 import asyncio
 import uuid
 from langchain_core.messages import SystemMessage, HumanMessage
-from agent.tools import (
+from tools.tool_calling import (
     search_linkedin_posts_mcp_tool_def, 
     generate_image_mcp_tool_def,
     call_mcp_tools
@@ -61,9 +61,13 @@ async def create_viral_post(user_prompt_text: str, gathered_info: str, llm, asyn
         
         # Track generated images
         generated_images = []
+        tool_call_count = 0
         
         # Process tool calls if any
         if post_response.tool_calls:
+            tool_call_count = len(post_response.tool_calls)
+            await _log(f"LLM requesting {tool_call_count} tool calls for post creation")
+            
             tool_messages = await call_mcp_tools(post_response, async_log_callback)
             
             # Extract and process any generated images BEFORE sending to LLM
@@ -106,7 +110,7 @@ async def create_viral_post(user_prompt_text: str, gathered_info: str, llm, asyn
         else:
             final_post = post_response.content
             
-        await _log("Viral post creation complete.")
+        await _log(f"Viral post creation complete. Used {tool_call_count} tool calls.")
         
         # Return both post and image info
         result = {

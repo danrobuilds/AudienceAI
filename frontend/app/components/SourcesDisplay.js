@@ -37,7 +37,7 @@ const SourcesDisplay = ({ sources }) => {
                       className="text-blue-700 hover:text-blue-900 text-sm flex items-center mt-1"
                     >
                       <ExternalLink className="mr-1 h-3 w-3" />
-                      Download PDF (expires in 1 hour)
+                      See PDF 
                     </a>
                   )}
                 </div>

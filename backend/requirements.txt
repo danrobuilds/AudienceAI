@@ -14,12 +14,9 @@ pandas
 numpy
 scikit-learn
 requests
-fastmcp
 newsapi-python
 pdfplumber
 beautifulsoup4
 supabase
 openai
 linkup
-mcp
-aiohttp
