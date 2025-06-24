@@ -1,5 +1,5 @@
 import os
-from linkup import LinkupClient
+from linkup_sdk import LinkupClient
 
 def web_search(query: str) -> dict:
     """
