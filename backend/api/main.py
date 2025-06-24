@@ -9,7 +9,8 @@ app = FastAPI()
 origins = [
     "https://audience-h1uu0w2ro-danrobuilds-projects.vercel.app",
     "https://www.audience-h1uu0w2ro-danrobuilds-projects.vercel.app",
-    "https://audience-ai.vercel.app"
+    "https://audience-ai.vercel.app",
+    "http://localhost:3000"
 ]
 
 app.add_middleware(

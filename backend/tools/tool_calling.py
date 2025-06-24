@@ -126,7 +126,7 @@ async def call_mcp_tools(llm_response, async_log_callback=None):
         async_log_callback: Optional logging callback function
     
     Returns:
-        List of ToolMessage objects with tool results
+        Tuple of (List of ToolMessage objects with tool results, List of generated images)
     """
     async def _log(message):
         if async_log_callback:
@@ -135,9 +135,10 @@ async def call_mcp_tools(llm_response, async_log_callback=None):
             print(f"[LOG] {message}") 
 
     tool_messages = []
+    generated_images = []  # Track generated images separately
     
     if not llm_response.tool_calls:
-        return tool_messages
+        return tool_messages, generated_images
         
     await _log(f"\nLLM decided to use {len(llm_response.tool_calls)} tool(s): {[tc.get('name', 'unknown') if isinstance(tc, dict) else getattr(tc, 'name', 'unknown') for tc in llm_response.tool_calls]}")
     
@@ -179,6 +180,12 @@ async def call_mcp_tools(llm_response, async_log_callback=None):
                         style=tool_args.get("style", "professional"),
                         aspect_ratio=tool_args.get("aspect_ratio", "16:9")
                     )
+                    
+                    # If image generation was successful, preserve the complete image object
+                    if isinstance(tool_output_content, dict) and "base64_data" in tool_output_content:
+                        generated_images.append(tool_output_content)
+                        await _log(f"Image generated and stored: {tool_output_content['filename']}")
+                        
                 else:
                     # Handle single-argument tools
                     tool_output_content = tool_function(query=tool_args["query"])
@@ -205,7 +212,7 @@ async def call_mcp_tools(llm_response, async_log_callback=None):
 
         tool_messages.append(ToolMessage(content=tool_output_content, tool_call_id=tool_call["id"]))
     
-    return tool_messages
+    return tool_messages, generated_images
 
 def _create_truncated_log_from_dict(tool_name: str, result_dict: dict) -> str:
     """Create truncated log message from dictionary response."""

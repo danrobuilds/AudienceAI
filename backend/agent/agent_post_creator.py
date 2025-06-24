@@ -68,39 +68,13 @@ async def create_viral_post(user_prompt_text: str, gathered_info: str, llm, asyn
             tool_call_count = len(post_response.tool_calls)
             await _log(f"LLM requesting {tool_call_count} tool calls for post creation")
             
-            tool_messages = await call_mcp_tools(post_response, async_log_callback)
+            tool_messages, generated_images = await call_mcp_tools(post_response, async_log_callback)
             
-            # Extract and process any generated images BEFORE sending to LLM
-            for i, tool_msg in enumerate(tool_messages):
-                if "IMAGE_GENERATED|" in tool_msg.content:
-                    try:
-                        # Parse the structured response
-                        content = tool_msg.content
-                        parts = content.split("|")
-                        
-                        # Extract metadata
-                        filename = parts[1].split(":")[1] if len(parts) > 1 else f"generated_{uuid.uuid4().hex[:8]}.png"
-                        size = parts[2].split(":")[1] if len(parts) > 2 else "Unknown"
-                        style = parts[3].split(":")[1] if len(parts) > 3 else "Unknown"
-                        base64_data = parts[4].split(":", 1)[1] if len(parts) > 4 else None
-                        
-                        if base64_data:
-                            generated_images.append({
-                                "filename": filename,
-                                "base64_data": base64_data,
-                                "size": size,
-                                "style": style
-                            })
-                            
-                            # Replace the tool message with a clean version for LLM (no base64)
-                            tool_messages[i].content = f"Image generated successfully. Filename: {filename}, Size: {size}, Style: {style}. The image has been prepared for display."
-                            
-                            await _log(f"Image generated and prepared for frontend: {filename}")
-                        else:
-                            await _log(f"Warning: Could not extract base64 data from image generation")
-                        
-                    except Exception as e:
-                        await _log(f"Error processing generated image: {e}")
+            # Log any generated images
+            if generated_images:
+                await _log(f"Generated {len(generated_images)} images for the post")
+                for img in generated_images:
+                    await _log(f"Image: {img['filename']} ({img['size']}, {img['style']} style)")
             
             messages.extend(tool_messages)
             
