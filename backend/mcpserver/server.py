@@ -78,8 +78,8 @@ except Exception as e:
     shared_embeddings = None # Set to None so tools can check and fail gracefully
 
 # These are the intended host and port for the SSE server
-SERVER_HOST = "0.0.0.0"
-SERVER_PORT = 8050
+SERVER_HOST = os.getenv("MCP_SERVER_HOST", "0.0.0.0")
+SERVER_PORT = int(os.getenv("MCP_SERVER_PORT", "8050"))
 
 # Create an MCP server
 mcp = FastMCP(

@@ -1,4 +1,5 @@
 import asyncio
+import os  # Added for environment variable access
 from mcp import ClientSession
 from mcp.client.sse import sse_client
 from langchain_core.messages import ToolMessage
@@ -138,11 +139,15 @@ async def call_mcp_tools(llm_response, async_log_callback=None):
     
     for tool_call in llm_response.tool_calls:
         tool_args = tool_call["args"]
-        server_url = "http://localhost:8050/sse" 
+        # Make MCP server URL configurable for Railway deployment
+        mcp_host = os.getenv("MCP_SERVER_HOST", "localhost")
+        mcp_port = os.getenv("MCP_SERVER_PORT", "8050")
+        server_url = f"http://{mcp_host}:{mcp_port}/sse"
         tool_output_content = "" 
         tool_name = tool_call["name"]
 
         await _log(f"Calling MCP tool '{tool_name}' with args: {tool_args} via SSE")
+        await _log(f"MCP Server URL: {server_url}")  # Added for debugging
 
         try:
             async with sse_client(server_url) as (read_stream, write_stream):

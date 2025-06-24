@@ -61,6 +61,14 @@ async def main():
     print(f"🌐 FastAPI will run on: http://0.0.0.0:{os.environ.get('PORT', 8000)}")
     print("🔧 MCP Server will run on: http://0.0.0.0:8050")
     
+    # Set environment variables for MCP server communication in Railway
+    if not os.getenv("MCP_SERVER_HOST"):
+        os.environ["MCP_SERVER_HOST"] = "127.0.0.1"  # Use localhost for internal communication
+    if not os.getenv("MCP_SERVER_PORT"):
+        os.environ["MCP_SERVER_PORT"] = "8050"
+    
+    print(f"🔧 MCP Client will connect to: http://{os.environ.get('MCP_SERVER_HOST', '127.0.0.1')}:{os.environ.get('MCP_SERVER_PORT', '8050')}/sse")
+    
     try:
         # Start both servers concurrently
         await asyncio.gather(
