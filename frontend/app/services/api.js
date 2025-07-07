@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { getTenantId } from './auth';
 
 // Get API base URL from environment variables
 // In production, this should be set to your actual backend URL
@@ -19,6 +20,8 @@ const getApiBaseUrl = () => {
 };
 
 const API_BASE_URL = getApiBaseUrl();
+
+
 
 // Create axios instance with base configuration
 const apiClient = axios.create({
@@ -75,11 +78,20 @@ export const userQueriesAPI = {
   /**
    * Generate content based on user prompt
    */
-  async generateContent(prompt) {
+  async generateContent(prompt, modality = 'linkedin', generateImage = false) {
     try {
+      const tenantId = getTenantId();
+      
+      if (!tenantId) {
+        throw new Error('No tenant ID found. Please sign in again.');
+      }
+      
       console.log("Sending generation request...");
       const response = await apiClient.post('/queries/generate', {
-        prompt: prompt
+        prompt: prompt,
+        modality: modality,
+        generate_image: generateImage,
+        tenant_id: tenantId
       });
       
       console.log("Generation response received:", response.data);
@@ -117,9 +129,18 @@ export const uploadsAPI = {
   /**
    * Upload multiple PDF files
    */
-  async uploadMultiple(files) {
+  async uploadMultiple(files, progressCallback) {
     try {
+      const tenantId = getTenantId();
+      
+      if (!tenantId) {
+        throw new Error('No tenant ID found. Please sign in again.');
+      }
+      
       const formData = new FormData();
+      
+      // Add tenant_id to form data
+      formData.append('tenant_id', tenantId);
       
       // Add each file to the form data
       files.forEach((file, index) => {
@@ -134,6 +155,12 @@ export const uploadsAPI = {
         },
         // Longer timeout for file uploads
         timeout: 60000, // 60 seconds
+        onUploadProgress: (progressEvent) => {
+          if (progressCallback && progressEvent.total) {
+            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            progressCallback(percentCompleted);
+          }
+        },
       });
       
       console.log("Upload response received:", response.data);
@@ -148,39 +175,6 @@ export const uploadsAPI = {
     }
   },
 
-  /**
-   * List uploaded documents
-   */
-  async listDocuments() {
-    try {
-      const response = await apiClient.get('/uploads/list');
-      return response.data;
-    } catch (error) {
-      console.error("Failed to list documents:", error);
-      throw new Error(
-        error.response?.data?.message || 
-        error.message || 
-        'Failed to list documents'
-      );
-    }
-  },
-
-  /**
-   * Delete a specific document
-   */
-  async deleteDocument(documentId) {
-    try {
-      const response = await apiClient.delete(`/uploads/delete/${documentId}`);
-      return response.data;
-    } catch (error) {
-      console.error("Failed to delete document:", error);
-      throw new Error(
-        error.response?.data?.message || 
-        error.message || 
-        'Failed to delete document'
-      );
-    }
-  },
 
   /**
    * Check uploads service health
@@ -196,6 +190,45 @@ export const uploadsAPI = {
         error.message || 
         'Failed to check service health'
       );
+    }
+  }
+};
+
+// Auth API endpoints
+export const authAPI = {
+  /**
+   * Sign in with tenant ID
+   */
+  async signin(tenantId) {
+    try {
+      console.log("Sending signin request...");
+      const response = await apiClient.post('/auth/signin', {
+        tenant_id: tenantId
+      });
+      
+      console.log("Signin response received:", response.data);
+      return response.data;
+    } catch (error) {
+      console.error("Signin failed:", error);
+      // Re-throw with original error structure for proper error handling
+      throw error;
+    }
+  },
+
+  /**
+   * Validate tenant ID
+   */
+  async validateTenant(tenantId) {
+    try {
+      const response = await apiClient.get('/auth/validate', {
+        params: {
+          tenant_id: tenantId
+        }
+      });
+      return response.data;
+    } catch (error) {
+      console.error("Tenant validation failed:", error);
+      throw error;
     }
   }
 };

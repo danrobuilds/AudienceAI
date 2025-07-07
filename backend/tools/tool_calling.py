@@ -28,13 +28,13 @@ search_document_library_mcp_tool_def = {
 
 search_linkedin_posts_mcp_tool_def = {
     "name": "search_linkedin_posts",
-    "description": "Search for viral LinkedIn posts using an embedding-based retriever. Use this to find examples of successful posts on a given topic to understand their structure and style for creating a new viral post.",
+    "description": "Search for successful LinkedIn posts using an embedding-based retriever. Use this to find examples of successful posts that match the content type and themes you're creating. This helps you understand the structure, tone, and style of successful posts in similar categories.",
     "parameters": {
         "type": "object",
         "properties": {
             "query": {
                 "type": "string",
-                "description": "The topic or theme to search for in viral post structures."
+                "description": "A structured content brief that captures: The main message/key points you want to communicate, The content type - a detailed description of the structure and format of the post you want to create, The intended tone/style, The target audience context, and The desired outcome/call-to-action. This should be a clear, concise summary that represents the essence of your content for finding similar successful posts."
             }
         },
         "required": ["query"],
@@ -72,13 +72,13 @@ search_recent_news_mcp_tool_def = {
 
 web_search_mcp_tool_def = {
     "name": "web_search",
-    "description": "Search the web for general information on any topic. Use this to find comprehensive market researchinformation beyond just news articles, including company information, industry insights, trends, and other relevant web content.",
+    "description": "Search the web for information on any topic. Use this to find comprehensive market research information including company information, industry insights, recent trends, and other relevant web content.",
     "parameters": {
         "type": "object",
         "properties": {
             "query": {
                 "type": "string",
-                "description": "The search query. Use descriptive keywords and phrases to find relevant web content."
+                "description": "The search query. Use descriptive keywords and phrases to find relevant web content that complements and strengthens previous information in the context of making a successful, informative, and engaging social media post."
             }
         },
         "required": ["query"],
@@ -89,7 +89,7 @@ web_search_mcp_tool_def = {
 
 generate_image_mcp_tool_def = {
     "name": "generate_image",
-    "description": "Generate an image for the LinkedIn post based on the post content and style. Use this when the post would benefit from a visual element.",
+    "description": "Generate an image for provided content based on the media content and style. Use this when the text content would benefit from a visual element.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -117,13 +117,14 @@ generate_image_mcp_tool_def = {
 
 # -------------------------- DIRECT TOOL CALLING LOGIC ------------------------------------------------------------
 
-async def call_mcp_tools(llm_response, async_log_callback=None):
+async def call_mcp_tools(llm_response, async_log_callback=None, tenant_id: str = ""):
     """
     Updated function to handle direct tool calling instead of MCP.
     
     Args:
         llm_response: The LLM response containing tool calls
         async_log_callback: Optional logging callback function
+        tenant_id: Tenant ID for multi-tenant operations
     
     Returns:
         Tuple of (List of ToolMessage objects with tool results, List of generated images)
@@ -186,8 +187,14 @@ async def call_mcp_tools(llm_response, async_log_callback=None):
                         generated_images.append(tool_output_content)
                         await _log(f"Image generated and stored: {tool_output_content['filename']}")
                         
+                elif tool_name == "search_document_library":
+                    # Handle search_document_library with tenant_id
+                    tool_output_content = tool_function(
+                        query=tool_args["query"],
+                        tenant_id=tenant_id
+                    )
                 else:
-                    # Handle single-argument tools
+                    # Handle other single-argument tools
                     tool_output_content = tool_function(query=tool_args["query"])
             
             # Create truncated log based on tool type and response format
@@ -253,7 +260,6 @@ def _truncate_linkedin_posts_dict(result: dict) -> str:
     for post in result['viral_posts']:
         lines.append(f"\nExample {post['example_number']}:")
         lines.append(f"  Similarity: {post['similarity_score']:.3f}")
-        lines.append(f"  Interactions: {post['interactions']}")
         # Truncate content
         content = post['content'][:100] + ("..." if len(post['content']) > 100 else "")
         lines.append(f"  Content: {content}")

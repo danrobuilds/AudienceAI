@@ -35,13 +35,17 @@ def search_linkedin_posts(query: str) -> dict:
         for i, doc in enumerate(response.data[:3]):  # Limit to top 3 for conciseness
             content = doc.get('content', 'No content available')
             similarity = doc.get('similarity', 0)
-            interactions = doc.get('interactions', 0)
+            target_audience = doc.get('target_audience', 'No target audience available')
+            media_description = doc.get('media_description', 'No media description available')
+            content_url = doc.get('content_url', 'No content URL available')
             
             post = {
                 "example_number": i + 1,
                 "content": content,
                 "similarity_score": similarity,
-                "interactions": interactions
+                "target_audience": target_audience,
+                "media_description": media_description,
+                "content_url": content_url
             }
             
             viral_posts.append(post)

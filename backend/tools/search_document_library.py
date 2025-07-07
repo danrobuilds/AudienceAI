@@ -2,50 +2,14 @@ import os
 from services.embeddings_service import shared_embeddings
 from services.supabase_service import supabase
 
-def generate_signed_url_for_document(document_uuid: str, tenant_id: str, filename: str, expiry_seconds: int = 3600) -> tuple[str | None, str | None]:
-    """
-    Generate a signed URL for a document using its UUID.
-    
-    Args:
-        document_uuid (str): The document UUID
-        tenant_id (str): Tenant ID
-        filename (str): Original filename (for extension)
-        expiry_seconds (int): URL expiry time in seconds
-        
-    Returns:
-        tuple[str | None, str | None]: (signed_url, error_message)
-    """
-    try:
-        # Construct storage path
-        file_extension = os.path.splitext(filename)[1]
-        storage_path = f"{tenant_id}/{document_uuid}{file_extension}"
-        
-        # Storage configuration for signed URL generation
-        STORAGE_BUCKET = "files"
-        
-        response = supabase.storage.from_(STORAGE_BUCKET).create_signed_url(
-            path=storage_path,
-            expires_in=expiry_seconds
-        )
-        
-        if hasattr(response, 'error') and response.error:
-            return None, f"Failed to create signed URL: {response.error}"
-        
-        # Extract the signed URL from the response
-        signed_url = response.get('signedURL') if hasattr(response, 'get') else response
-        
-        return signed_url, None
-        
-    except Exception as e:
-        return None, f"Failed to generate signed URL: {e}"
-
-def search_document_library(query: str) -> dict:
+def search_document_library(query: str, tenant_id: str = "") -> dict:
     """
     Search the internal PDF document library using Supabase vector similarity search.
     query (str): The topic or keywords to search for in the documents.
+    tenant_id (str): Tenant ID for multi-tenant document search.
     Returns: dict: Dictionary containing document segments with metadata and content.
     """
-    print(f"Tool: Searching document library with query: '{query}'")
+    print(f"Tool: Searching document library with query: '{query}' for tenant: '{tenant_id}'")
     
     if shared_embeddings is None:
         return {"error": "Embeddings model not available for document library search."}
@@ -57,12 +21,13 @@ def search_document_library(query: str) -> dict:
         # Generate embedding for the query
         query_embedding = shared_embeddings.embed_query(query)
         
-        # Use specific RPC function for document search
+        # Use specific RPC function for document search with tenant filtering
         response = supabase.rpc(
             'search_internal_documents', 
             {
                 'query_embedding': query_embedding,
-                'match_count': 3
+                'match_count': 3,
+                'input_tenant_id': tenant_id
             }
         ).execute()
         
@@ -132,3 +97,32 @@ def search_document_library(query: str) -> dict:
     except Exception as e:
         print(f"Error in search_document_library tool: {e}")
         return {"error": f"Error retrieving documents from library: {str(e)}"} 
+    
+
+
+def generate_signed_url_for_document(document_uuid: str, tenant_id: str, filename: str, expiry_seconds: int = 3600) -> tuple[str | None, str | None]:
+    """ Generate a signed URL for a document using its UUID """
+
+    try:
+        # Construct storage path
+        file_extension = os.path.splitext(filename)[1]
+        storage_path = f"{tenant_id}/{document_uuid}{file_extension}"
+        
+        # Storage configuration for signed URL generation
+        STORAGE_BUCKET = "files"
+        
+        response = supabase.storage.from_(STORAGE_BUCKET).create_signed_url(
+            path=storage_path,
+            expires_in=expiry_seconds
+        )
+        
+        if hasattr(response, 'error') and response.error:
+            return None, f"Failed to create signed URL: {response.error}"
+        
+        # Extract the signed URL from the response
+        signed_url = response.get('signedURL') if hasattr(response, 'get') else response
+        
+        return signed_url, None
+        
+    except Exception as e:
+        return None, f"Failed to generate signed URL: {e}"

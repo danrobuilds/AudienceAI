@@ -1,7 +1,8 @@
-from fastapi import APIRouter, File, UploadFile, HTTPException, status
+from fastapi import APIRouter, File, UploadFile, HTTPException, status, Form
 from fastapi.responses import JSONResponse
 from typing import List, Optional
 import io
+import uuid
 from pydantic import BaseModel
 from infra.pdf_uploader import process_and_add_pdf
 
@@ -19,10 +20,20 @@ class DocumentListResponse(BaseModel):
 
 
 @router.post("/upload-multiple", response_model=List[DocumentUploadResponse])
-async def upload_multiple_documents(files: List[UploadFile] = File(...)):
+async def upload_multiple_documents(files: List[UploadFile] = File(...), tenant_id: str = Form(...)):
     """
     Upload and process multiple PDF documents.
     """
+
+    try:
+        uuid.UUID(tenant_id.strip())
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid tenant ID format. Must be a valid UUID."
+        )
+        
+    
     if len(files) > 10:  # Limit batch uploads
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -63,8 +74,8 @@ async def upload_multiple_documents(files: List[UploadFile] = File(...)):
                 ))
                 continue
             
-            # Process the PDF
-            success, message = process_and_add_pdf(file_content, file.filename)
+            # Process the PDF with tenant_id
+            success, message = process_and_add_pdf(file_content, file.filename, tenant_id.strip())
             
             chunks_created = None
             if success:
@@ -90,25 +101,6 @@ async def upload_multiple_documents(files: List[UploadFile] = File(...)):
     
     return results
 
-@router.get("/list", response_model=DocumentListResponse)
-async def list_documents():
-    """
-    List all uploaded documents in the vector database.
-    Note: This is a placeholder implementation. You may need to implement
-    a proper document listing function in the pdf_extractor module.
-    """
-    try:
-        # TODO: Implement document listing functionality in pdf_extractor
-        # For now, return a placeholder response
-        return DocumentListResponse(
-            documents=[],
-            total_count=0
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error retrieving document list: {str(e)}"
-        )
 
 @router.delete("/delete/{document_id}")
 async def delete_document(document_id: str):

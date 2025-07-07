@@ -1,100 +1,193 @@
-import React from 'react';
-import { FileText, Globe, TrendingUp, ExternalLink, Database, Link } from 'lucide-react';
+import React, { useState } from 'react';
+import { ChevronDown, ChevronUp, ExternalLink } from 'lucide-react';
 
-const SourcesDisplay = ({ sources }) => {
-  if (!sources || Object.values(sources).every(arr => arr.length === 0)) {
+// Source extraction functions (moved from sourceExtractor.js)
+
+/**
+ * Extract PDF sources from logs
+ */
+function extractPDFSources(logs) {
+  const pdfSources = [];
+  const logText = Array.isArray(logs) ? logs.join('\n') : logs;
+  
+  // Extract PDF sources from "Segment X:" pattern
+  const segmentPattern = /Segment \d+:\s*\n\s*File: (.+?\.pdf)\s*\n\s*Similarity: [\d.]+\s*\n\s*Document URL: (.+?)\s*\n/g;
+  let match;
+  
+  while ((match = segmentPattern.exec(logText)) !== null) {
+    const filename = match[1].trim();
+    const url = match[2].trim();
+    
+    // Only add if we haven't seen this filename before
+    if (!pdfSources.some(source => source.filename === filename)) {
+      pdfSources.push({
+        filename: filename,
+        url: url
+      });
+    }
+  }
+  
+  return pdfSources;
+}
+
+/**
+ * Extract web article sources from logs
+ */
+function extractWebSources(logs) {
+  const webSources = [];
+  const logText = Array.isArray(logs) ? logs.join('\n') : logs;
+  
+  // Extract web sources from "Result X:" pattern
+  const resultPattern = /Result \d+:\s*\n\s*Title: (.+?)\s*\n\s*URL: (.+?)\s*\n/g;
+  let match;
+  
+  while ((match = resultPattern.exec(logText)) !== null) {
+    const title = match[1].trim();
+    const url = match[2].trim();
+    
+    // Only add if we haven't seen this URL before
+    if (!webSources.some(source => source.url === url)) {
+      webSources.push({
+        title: title,
+        url: url
+      });
+    }
+  }
+  
+  return webSources;
+}
+
+/**
+ * Extract viral post sources from logs
+ */
+function extractViralPostSources(logs) {
+  const viralSources = [];
+  const logText = Array.isArray(logs) ? logs.join('\n') : logs;
+  
+  // Extract viral posts from "Example X:" pattern
+  // Updated pattern to match the actual log format without Interactions field
+  const examplePattern = /Example \d+:\s*\n\s*Similarity: ([\d.]+)\s*\n\s*Content: (.+?)(?=\n\nExample|\nLinkedin viral content creation complete|$)/gs;
+  let match;
+  
+  while ((match = examplePattern.exec(logText)) !== null) {
+    const similarityScore = match[1].trim();
+    const content = match[2].trim();
+    
+    console.log('SourcesDisplay: Extracted viral post:', { similarityScore, content: content.substring(0, 100) });
+    
+    // Only add if we haven't seen this content before
+    if (!viralSources.some(source => source.content === content)) {
+      // Use first 100 characters as title
+      const title = content.substring(0, 100) + (content.length > 100 ? '...' : '');
+      
+      viralSources.push({
+        title: title,
+        content: content,
+        similarityScore: similarityScore,
+      });
+    }
+  }
+  
+  return viralSources;
+}
+
+/**
+ * Extract all sources from logs
+ */
+function extractSourcesFromLogs(logs) {
+  if (!logs || logs.length === 0) {
+    return {
+      pdfs: [],
+      webArticles: [],
+      viralPosts: []
+    };
+  }
+
+  return {
+    pdfs: extractPDFSources(logs),
+    webArticles: extractWebSources(logs),
+    viralPosts: extractViralPostSources(logs)
+  };
+}
+
+// Main Sources Display Component
+const SourcesDisplay = ({ sources, logs }) => {
+  const [expanded, setExpanded] = useState(true);
+  
+  // If logs are provided, extract sources from them
+  const extractedSources = logs ? extractSourcesFromLogs(logs) : sources;
+  
+  if (!extractedSources || Object.values(extractedSources).every(arr => arr.length === 0)) {
     return null;
   }
 
-  // Count total sources
-  const totalSources = Object.values(sources).reduce((sum, arr) => sum + arr.length, 0);
+  const totalSources = Object.values(extractedSources).reduce((sum, arr) => sum + arr.length, 0);
 
   return (
-    <div className="mt-6 border border-blue-200 rounded-lg p-4 bg-blue-50">
-      <h3 className="text-lg font-semibold mb-4 text-blue-900 flex items-center">
-        <Database className="mr-2 h-5 w-5" />
-        📚 Sources Used ({totalSources} total)
-      </h3>
+    <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-100">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center justify-between w-full text-left"
+      >
+        <span className="text-sm font-medium text-gray-700">
+          📚 Sources ({totalSources})
+        </span>
+        {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+      </button>
       
-      <div className="space-y-4">
-        {/* Internal Documents */}
-        {sources.pdfs && sources.pdfs.length > 0 && (
-          <div className="bg-white rounded-lg border border-blue-200 p-3">
-            <h4 className="font-semibold mb-3 text-blue-800 flex items-center">
-              <FileText className="mr-2 h-4 w-4" />
-              📄 Internal Documents ({sources.pdfs.length})
-            </h4>
-            <div className="space-y-2">
-              {sources.pdfs.map((pdf, index) => (
-                <div key={index} className="bg-blue-50 rounded-md p-2 border-l-4 border-blue-400">
-                  <div className="font-medium text-gray-800">• {pdf.filename}</div>
-                  <div className="text-xs text-gray-600">Company document analyzed for relevant information</div>
-                  {pdf.url && (
-                    <a 
-                      href={pdf.url} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="text-blue-700 hover:text-blue-900 text-sm flex items-center mt-1"
-                    >
-                      <ExternalLink className="mr-1 h-3 w-3" />
-                      See PDF 
-                    </a>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Web Articles Used */}
-        {sources.webArticles && sources.webArticles.length > 0 && (
-          <div className="bg-white rounded-lg border border-green-200 p-3">
-            <h4 className="font-semibold mb-3 text-green-800 flex items-center">
-              <Link className="mr-2 h-4 w-4" />
-              🌐 Web Articles Used ({sources.webArticles.length})
-            </h4>
-            <div className="space-y-2">
-              {sources.webArticles.map((webResult, index) => (
-                <div key={`web-${index}`} className="bg-green-50 rounded-md p-2 border-l-4 border-green-400">
-                  <div className="font-medium text-gray-800">• {webResult.title}</div>
+      {expanded && (
+        <div className="mt-3 space-y-2">
+          {extractedSources.pdfs && extractedSources.pdfs.map((pdf, index) => (
+            <div key={index} className="text-xs text-gray-600 bg-white p-2 rounded border-l-2 border-blue-300">
+              <div className="flex items-center justify-between">
+                <span>📄 {pdf.filename}</span>
+                {pdf.url && (
                   <a 
-                    href={webResult.url} 
+                    href={pdf.url} 
                     target="_blank" 
                     rel="noopener noreferrer"
-                    className="text-green-700 hover:text-green-900 text-sm flex items-center mt-1"
+                    className="text-blue-600 hover:text-blue-800 ml-2"
                   >
-                    <ExternalLink className="mr-1 h-3 w-3" />
-                    {webResult.url}
+                    <ExternalLink className="h-3 w-3" />
                   </a>
-                </div>
-              ))}
+                )}
+              </div>
             </div>
-          </div>
-        )}
-
-        {/* Viral Posts Reference */}
-        {sources.viralPosts && sources.viralPosts.length > 0 && (
-          <div className="bg-white rounded-lg border border-purple-200 p-3">
-            <h4 className="font-semibold mb-3 text-purple-800 flex items-center">
-              <TrendingUp className="mr-2 h-4 w-4" />
-              💼 Viral Posts Referenced ({sources.viralPosts.length})
-            </h4>
-            <div className="space-y-2">
-              {sources.viralPosts.map((post, index) => (
-                <div key={index} className="bg-purple-50 rounded-md p-2 border-l-4 border-purple-400">
-                  <div className="font-medium text-gray-800">• {post.title}</div>
-                  <div className="text-sm text-gray-600">
-                    Used as reference for viral content patterns
-                    {post.similarityScore && (
-                      <span className="ml-2">• 📊 {Math.round(post.similarityScore * 100)}% similarity</span>
-                    )}
-                  </div>
-                </div>
-              ))}
+          ))}
+          {extractedSources.webArticles && extractedSources.webArticles.map((article, index) => (
+            <div key={index} className="text-xs text-gray-600 bg-white p-2 rounded border-l-2 border-green-300">
+              <div className="flex items-center justify-between">
+                <span>🌐 {article.title}</span>
+                {article.url && (
+                  <a 
+                    href={article.url} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="text-green-600 hover:text-green-800 ml-2"
+                  >
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                )}
+              </div>
             </div>
-          </div>
-        )}
-      </div>
+          ))}
+          {extractedSources.viralPosts && extractedSources.viralPosts.map((post, index) => (
+            <div key={index} className="text-xs text-gray-600 bg-white p-2 rounded border-l-2 border-purple-300">
+              <div className="flex items-center justify-between">
+                <span>💼 {post.title}</span>
+                <div className="flex items-center gap-2 ml-2">
+  
+                  {post.similarityScore && (
+                    <span className="text-purple-600">
+                      {Math.round(post.similarityScore * 100)}%
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

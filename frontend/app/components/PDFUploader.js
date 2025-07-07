@@ -65,11 +65,8 @@ const PDFUploader = ({ isOpen, onClose }) => {
 
       setUploadResults(transformedResults);
       
-      // Clear files on successful upload
-      const hasAnySuccess = results.some(r => r.success);
-      if (hasAnySuccess) {
-        setFiles([]);
-      }
+      // Don't clear files immediately - let users see the results
+      // Files will be cleared when the modal is closed
 
     } catch (error) {
       setUploadResults([{
@@ -93,9 +90,18 @@ const PDFUploader = ({ isOpen, onClose }) => {
   if (!isOpen) return null;
 
   return (
-    <div className="border-t border-gray-200 pt-6 mt-6">
-      <div className="mb-4">
-        <h2 className="text-xl font-semibold mb-4">Upload PDF Documents to Knowledge Base</h2>
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-semibold">Upload PDF Documents to Knowledge Base</h2>
+          <button
+            onClick={handleClose}
+            className="text-gray-500 hover:text-gray-700 text-2xl"
+          >
+            ×
+          </button>
+        </div>
+        <div className="mb-4">
         
         {/* Dropzone */}
         <div
@@ -203,6 +209,7 @@ const PDFUploader = ({ isOpen, onClose }) => {
             </div>
           </div>
         )}
+        </div>
 
         {/* Action Buttons */}
         <div className="flex gap-4 mt-6">

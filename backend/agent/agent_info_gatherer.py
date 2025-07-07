@@ -6,7 +6,7 @@ from tools.tool_calling import (
     call_mcp_tools
 )
 
-async def gather_information(user_prompt_text: str, llm, async_log_callback=None):
+async def gather_information(user_prompt_text: str, llm, async_log_callback=None, company_context: str = "", tenant_id: str = ""):
     """
     Agent 1: Gather comprehensive information relevant to the user's request.
     
@@ -14,6 +14,7 @@ async def gather_information(user_prompt_text: str, llm, async_log_callback=None
         user_prompt_text: The user's request for creating a LinkedIn post
         llm: The language model instance
         async_log_callback: Optional logging callback function
+        formatted_context: Pre-formatted company context from orchestrator
     
     Returns:
         String containing gathered information
@@ -32,11 +33,14 @@ async def gather_information(user_prompt_text: str, llm, async_log_callback=None
         tool_choice="auto"
     )
     
-    info_system_message = """You are a research assistant. Your task is to gather comprehensive information relevant to the user's request for creating a LinkedIn post.
+    info_system_message = f"""You are a marketing research assistant for a company. Here is context about the company: {company_context} 
+    
+    Your task is to gather comprehensive information relevant to the user's request for creating a social media post.
 
     Use the available tools to:
     1. Search the document library for relevant company/internal information
-    2. Perform general web searches for broader context and information (this can include recent news, market research, industry insights, trends, and other relevant web content)
+    2. Perform web searches to COMPLEMENT the information from the document library (this can include recent news, market research, industry insights, trends, and other relevant web content)
+    2a. Use web searches as an opportunity to search for information that is not already present in the document library.
 
     Be thorough in your information gathering, and be efficent. Never call a single tool more than 2 times. Call multiple tools with different, but comprehensive, queries to get a wide range of relevant information.
     Your goal is to collect as much relevant context as possible, not to create the post yet.
@@ -46,7 +50,7 @@ async def gather_information(user_prompt_text: str, llm, async_log_callback=None
     
     messages = [
         SystemMessage(content=info_system_message),
-        HumanMessage(content=f"Gather comprehensive information for creating a LinkedIn post about: {user_prompt_text}")
+        HumanMessage(content=f"Gather comprehensive information for creating a social media post about: {user_prompt_text}")
     ]
     
     # Track tool call count
@@ -70,7 +74,7 @@ async def gather_information(user_prompt_text: str, llm, async_log_callback=None
             if total_tool_calls > max_tool_calls:
                 await _log(f"WARNING: High number of tool calls ({total_tool_calls}). This may indicate inefficient research strategy.")
             
-            tool_messages = await call_mcp_tools(info_response, async_log_callback)
+            tool_messages, _ = await call_mcp_tools(info_response, async_log_callback, tenant_id)
             messages.extend(tool_messages)
             
             # Get final information summary

@@ -13,7 +13,6 @@ from services.supabase_service import supabase
 # --- Constants ---
 EMBEDDINGS_MODEL_NAME = "nomic-embed-text-v1.5"
 STORAGE_BUCKET = "files"
-TENANT_ID = "2e916cd6-d890-4127-afe0-6e3dde85bddc"  # Dummy tenant ID for now
 
 # --- Chunking Configuration ---
 CHUNK_SIZE = 1000        # Characters per chunk
@@ -39,7 +38,7 @@ def _initialize_embeddings():
             raise ConnectionError(f"Failed to initialize NomicEmbeddings for '{EMBEDDINGS_MODEL_NAME}': {e}. Ensure NOMIC_API_KEY is set in your environment variables.")
     return embeddings_model_instance
 
-def _upload_pdf_to_storage(pdf_bytes: bytes, filename: str, document_uuid: str, tenant_id: str = None) -> tuple[bool, str | None]:
+def _upload_pdf_to_storage(pdf_bytes: bytes, filename: str, document_uuid: str, tenant_id: str) -> tuple[bool, str | None]:
     """
     Upload PDF to Supabase storage bucket using document UUID as filename.
     
@@ -47,23 +46,23 @@ def _upload_pdf_to_storage(pdf_bytes: bytes, filename: str, document_uuid: str, 
         pdf_bytes (bytes): PDF file bytes
         filename (str): Original filename (for extension)
         document_uuid (str): UUID from database to use as filename
-        tenant_id (str, optional): Tenant ID for folder organization
+        tenant_id (str): Tenant ID for folder organization
         
     Returns:
         tuple[bool, str | None]: (success, error_message)
     """
     try:
-        # Use provided tenant_id or default
-        current_tenant_id = tenant_id or TENANT_ID
+        if not tenant_id or not tenant_id.strip():
+            return False, "Tenant ID is required for file upload"
         
         # Use document UUID as filename with original extension
         file_extension = os.path.splitext(filename)[1]
         storage_filename = f"{document_uuid}{file_extension}"
         
         # Create tenant-specific path
-        storage_path = f"{current_tenant_id}/{storage_filename}"
+        storage_path = f"{tenant_id.strip()}/{storage_filename}"
         
-        print(f"[pdf_uploader DEBUG] Uploading {filename} as {storage_filename} to bucket '{STORAGE_BUCKET}' in folder '{current_tenant_id}'")
+        print(f"[pdf_uploader DEBUG] Uploading {filename} as {storage_filename} to bucket '{STORAGE_BUCKET}' in folder '{tenant_id.strip()}'")
         
         # Upload file to storage with tenant folder path
         response = supabase.storage.from_(STORAGE_BUCKET).upload(
@@ -263,18 +262,19 @@ def _insert_chunks_to_database(chunks: list[Document], embeddings: list[list[flo
         print(f"[pdf_uploader ERROR] Failed to insert chunks into database: {e}")
         return False, f"Failed to insert chunks into database: {e}", None
 
-def _check_existing_document(filename: str) -> tuple[bool, int]:
+def _check_existing_document(filename: str, tenant_id: str) -> tuple[bool, int]:
     """
-    Check if a document with the same filename already exists in the database.
+    Check if a document with the same filename already exists in the database for the specific tenant.
     
     Args:
         filename (str): Original filename to check
+        tenant_id (str): Tenant ID to check within
         
     Returns:
         tuple[bool, int]: (exists, chunk_count)
     """
     try:
-        response = supabase.table("internal_documents").select("id").eq("file_name", filename).execute()
+        response = supabase.table("internal_documents").select("id").eq("file_name", filename).eq("tenant_id", tenant_id).execute()
         
         if hasattr(response, 'error') and response.error:
             print(f"[pdf_uploader WARNING] Error checking existing document: {response.error}")
@@ -283,14 +283,14 @@ def _check_existing_document(filename: str) -> tuple[bool, int]:
         chunk_count = len(response.data) if response.data else 0
         exists = chunk_count > 0
         
-        print(f"[pdf_uploader DEBUG] Document '{filename}' {'exists' if exists else 'does not exist'} with {chunk_count} chunks")
+        print(f"[pdf_uploader DEBUG] Document '{filename}' for tenant '{tenant_id}' {'exists' if exists else 'does not exist'} with {chunk_count} chunks")
         return exists, chunk_count
         
     except Exception as e:
-        print(f"[pdf_uploader WARNING] Could not check for existing document {filename}: {e}")
+        print(f"[pdf_uploader WARNING] Could not check for existing document {filename} for tenant {tenant_id}: {e}")
         return False, 0
 
-def process_and_add_pdf(pdf_bytes: bytes, original_filename: str, tenant_id: str = None) -> tuple[bool, str]:
+def process_and_add_pdf(pdf_bytes: bytes, original_filename: str, tenant_id: str) -> tuple[bool, str]:
     """
     Processes an uploaded PDF, extracts text, chunks it, generates embeddings,
     and stores everything in Supabase if the document doesn't already exist.
@@ -298,16 +298,17 @@ def process_and_add_pdf(pdf_bytes: bytes, original_filename: str, tenant_id: str
     Args:
         pdf_bytes (bytes): PDF file bytes
         original_filename (str): Original filename
-        tenant_id (str, optional): Tenant ID, defaults to TENANT_ID constant
+        tenant_id (str): Tenant ID for multi-tenant organization
         
     Returns:
         tuple[bool, str]: (success, message)
     """
-    # Use provided tenant_id or default
-    current_tenant_id = tenant_id or TENANT_ID
+    # Validate tenant_id
+    if not tenant_id or not tenant_id.strip():
+        return False, "Tenant ID is required for document processing"
     
-    # Check if document already exists BEFORE uploading
-    exists, existing_chunk_count = _check_existing_document(original_filename)
+    # Check if document already exists BEFORE uploading (per tenant)
+    exists, existing_chunk_count = _check_existing_document(original_filename, tenant_id.strip())
     if exists:
         return False, f"File '{original_filename}' already exists in the database with {existing_chunk_count} chunks."
     
@@ -334,12 +335,12 @@ def process_and_add_pdf(pdf_bytes: bytes, original_filename: str, tenant_id: str
         return False, f"Failed to generate embeddings: {e}"
     
     # Insert chunks and embeddings into database FIRST to get the document UUID
-    success, message, document_uuid = _insert_chunks_to_database(chunked_documents, embeddings, original_filename, current_tenant_id)
+    success, message, document_uuid = _insert_chunks_to_database(chunked_documents, embeddings, original_filename, tenant_id.strip())
     if not success or not document_uuid:
         return False, message
     
     # Upload PDF to storage using the document UUID as filename
-    upload_success, upload_error = _upload_pdf_to_storage(pdf_bytes, original_filename, document_uuid, current_tenant_id)
+    upload_success, upload_error = _upload_pdf_to_storage(pdf_bytes, original_filename, document_uuid, tenant_id.strip())
     if not upload_success:
         # Clean up database entries if storage upload fails
         try:
