@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader, ImageIcon, Plus, Trash2, ChevronDown, ChevronUp, ExternalLink, LogOut } from 'lucide-react';
 import { userQueriesAPI } from '../services/api';
@@ -8,7 +8,7 @@ import PDFUploader from '../components/PDFUploader';
 import SourcesDisplay from '../components/SourcesDisplay';
 import { getTenantId, clearTenantId } from '../services/auth';
 
-export default function DashboardPage() {
+function DashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const currentGenerationId = searchParams.get('id');
@@ -574,5 +574,29 @@ export default function DashboardPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// Loading component for Suspense fallback
+function DashboardLoading() {
+  return (
+    <div className="min-h-screen bg-white flex items-center justify-center">
+      <div className="flex items-center">
+        <Loader className="animate-spin h-8 w-8 text-blue-500 mr-4" />
+        <div>
+          <h3 className="text-lg font-semibold">Loading Dashboard...</h3>
+          <p className="text-gray-600">Please wait while we prepare your content.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Main component wrapped in Suspense
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={<DashboardLoading />}>
+      <DashboardContent />
+    </Suspense>
   );
 } 
