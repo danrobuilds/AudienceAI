@@ -77,6 +77,9 @@ apiClient.interceptors.response.use(
 export const userQueriesAPI = {
   /**
    * Generate content based on user prompt
+   * @param {string} prompt - The user's content request
+   * @param {string} modality - Content type: 'linkedin', 'twitter', 'instagram', 'blog'
+   * @param {boolean} generateImage - Whether to generate images
    */
   async generateContent(prompt, modality = 'linkedin', generateImage = false) {
     try {

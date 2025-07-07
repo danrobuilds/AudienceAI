@@ -71,6 +71,7 @@ function DashboardContent() {
   // Modality options
   const modalityOptions = [
     { id: 'linkedin', label: 'LinkedIn', emoji: '💼' },
+    { id: 'blog', label: 'Blog', emoji: '📝' },
     { id: 'twitter', label: 'Twitter', emoji: '🐦' },
     { id: 'instagram', label: 'Instagram', emoji: '📸' },
   ];

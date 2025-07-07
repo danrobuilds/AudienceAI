@@ -91,19 +91,19 @@ async def create_viral_post(user_prompt_text: str, gathered_info: str, llm, asyn
         # Add final instruction for structured output
         messages.append(HumanMessage(content=f"""Now create the final viral {modality} content that satisfies the user's original request exactly using all the information gathered.
         
-        IMPORTANT: Format the content based on the provided examples of successful {modality} posts.
+            IMPORTANT: Format the content based on the provided examples of successful {modality} posts.
 
-        YOUR RESPONSE MUST INCLUDE:
-        1. post_content: The viral {modality} post content that satisfies the user's original request
-        2. image_description: A detailed description for generating a compelling image that would enhance this post's engagement
-        
-        Focus on creating both high-quality post content and a vivid image description that complements the post.
-        """))
+            YOUR RESPONSE MUST INCLUDE:
+            1. post_content: The viral {modality} post content that satisfies the user's original request
+            2. image_description: A detailed description for generating a compelling image that would enhance this post's engagement
+            
+            Focus on creating both high-quality post content and a vivid image description that complements the post.
+            """))
         
         await _log(f"Invoking LLM for structured {modality} content creation...")
         structured_response = await asyncio.wait_for(llm_structured.ainvoke(messages), timeout=120.0)
         
-        await _log(f"{modality.title()} viral content creation complete. Used {tool_call_count} tool calls.")
+        await _log(f"{modality.title()} content creation complete. Used {tool_call_count} tool calls.")
         
         return structured_response
         
@@ -116,8 +116,8 @@ async def create_viral_post(user_prompt_text: str, gathered_info: str, llm, asyn
 
 def get_tools_for_modality(modality: str):
     """
-    Get the appropriate toolset for the specified social media modality.
-    Each platform gets optimized tools for viral content creation.
+    Get the appropriate toolset for the specified content modality.
+    Each platform gets optimized tools for content creation.
     """
     if modality == "linkedin":
         return [search_linkedin_posts_mcp_tool_def]
@@ -127,6 +127,8 @@ def get_tools_for_modality(modality: str):
         return [search_linkedin_posts_mcp_tool_def]  # Temporary fallback
     elif modality == "instagram":
         return [search_linkedin_posts_mcp_tool_def]  # Temporary fallback
+    elif modality == "blog":
+        return [search_linkedin_posts_mcp_tool_def]  # Blog posts can reference LinkedIn content for professional insights
     else:
         return [search_linkedin_posts_mcp_tool_def]
 
@@ -189,6 +191,32 @@ def get_system_message_for_modality(modality: str, company_context: str):
         - Uses emojis and line breaks for readability
 
         Include suggestions for Instagram Stories or Reels if applicable.
+        """
+
+    elif modality == "blog":
+        return """YOUR TASK is to create a comprehensive blog post using the provided information and research.
+
+        1. Research relevant content and examples to inform your blog post structure and style.
+        2. Create a compelling blog post that:
+        - Has an engaging, SEO-friendly title
+        - Includes a compelling introduction that hooks the reader
+        - Uses clear headings and subheadings for structure
+        - Provides valuable, actionable insights
+        - Includes relevant examples and case studies
+        - Has a strong conclusion with key takeaways
+        - Uses professional, informative tone
+        - Incorporates relevant keywords naturally
+        - Is 800-2000 words in length
+        - Includes calls-to-action where appropriate
+
+        Structure your blog post with:
+        - Title (H1)
+        - Introduction
+        - Main sections with subheadings (H2/H3)
+        - Conclusion
+        - Key takeaways or summary
+
+        Focus on providing value to the reader while maintaining professional credibility.
         """
 
     else:

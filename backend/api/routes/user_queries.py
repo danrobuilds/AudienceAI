@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 class QueryRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=2000, description="User prompt for generating content")
-    modality: Literal["linkedin", "twitter", "tiktok", "instagram"] = Field(default="linkedin", description="Social media platform to generate content for")
+    modality: Literal["linkedin", "twitter", "blog", "instagram"] = Field(default="linkedin", description="Social media platform to generate content for")
     stream: Optional[bool] = Field(default=False, description="Whether to stream the response")
     tenant_id: str = Field(..., description="Tenant ID for company context (required UUID)")
     generate_image: Optional[bool] = Field(default=False, description="Whether to generate an image for the post")
