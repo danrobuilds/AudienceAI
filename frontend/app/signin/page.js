@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { User, Lock, LogIn, AlertCircle, Loader } from 'lucide-react';
-import { getTenantId, setTenantId, isAuthenticated, isValidUUID } from '../services/auth';
+import { getTenantId, setTenantId, isAuthenticated, isValidUUID, authRefreshInterval } from '../services/auth';
 import { authAPI } from '../services/api';
 
 export default function SignInPage() {
@@ -18,6 +18,7 @@ export default function SignInPage() {
     const checkExistingAuth = () => {
       if (isAuthenticated()) {
         // User is already authenticated, redirect to dashboard
+        authRefreshInterval();
         router.push('/dashboard');
         return;
       }

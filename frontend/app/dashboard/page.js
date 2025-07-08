@@ -68,6 +68,7 @@ function DashboardContent() {
     }
   }, [currentGeneration?.generatedPost]);
 
+
   // Modality options
   const modalityOptions = [
     { id: 'linkedin', label: 'LinkedIn', emoji: '💼' },
