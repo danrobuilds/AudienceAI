@@ -6,7 +6,8 @@ import { Loader, ImageIcon, Plus, Trash2, ChevronDown, ChevronUp, ExternalLink, 
 import { userQueriesAPI } from '../services/api';
 import PDFUploader from '../components/PDFUploader';
 import SourcesDisplay from '../components/SourcesDisplay';
-import { getTenantId, clearTenantId } from '../services/auth';
+import Sidebar from '../components/Sidebar';
+import { getTenantId } from '../services/auth';
 
 function DashboardContent() {
   const router = useRouter();
@@ -25,6 +26,14 @@ function DashboardContent() {
   const textareaRef = useRef(null);
   const justCreatedGenerationId = useRef(null);
 
+  // Modality options
+  const modalityOptions = [
+    { id: 'linkedin', label: 'LinkedIn', emoji: '💼' },
+    { id: 'blog', label: 'Blog', emoji: '📝' },
+    { id: 'twitter', label: 'Twitter', emoji: '🐦' },
+    { id: 'instagram', label: 'Instagram', emoji: '📸' },
+  ];
+
   // Helper function to save generations to localStorage without images (max 5 entries)
   const saveGenerationsToStorage = (generationsArray) => {
     const generationsForStorage = generationsArray
@@ -36,7 +45,7 @@ function DashboardContent() {
     localStorage.setItem('audienceai_generations', JSON.stringify(generationsForStorage));
   };
 
-  // Load generations from localStorage
+  // Load generations from localStorage and handle URL changes
   useEffect(() => {
     const savedGenerations = localStorage.getItem('audienceai_generations');
     if (savedGenerations) {
@@ -52,10 +61,17 @@ function DashboardContent() {
               setCurrentGeneration(current);
             }
           }
+        } else {
+          // If no generation ID in URL, clear current generation (new generation view)
+          setCurrentGeneration(null);
+          justCreatedGenerationId.current = null;
         }
       } catch (error) {
         console.error('Error loading generations:', error);
       }
+    } else if (!currentGenerationId) {
+      // If no saved generations and no current generation ID, ensure we're in new generation view
+      setCurrentGeneration(null);
     }
   }, [currentGenerationId]);
 
@@ -68,24 +84,6 @@ function DashboardContent() {
     }
   }, [currentGeneration?.generatedPost]);
 
-
-  // Modality options
-  const modalityOptions = [
-    { id: 'linkedin', label: 'LinkedIn', emoji: '💼' },
-    { id: 'blog', label: 'Blog', emoji: '📝' },
-    { id: 'twitter', label: 'Twitter', emoji: '🐦' },
-    { id: 'instagram', label: 'Instagram', emoji: '📸' },
-  ];
-
-  // Sign out handler
-  const handleSignOut = () => {
-    clearTenantId();
-    setGenerations([]);
-    setCurrentGeneration(null);
-    localStorage.removeItem('audienceai_generations');
-    router.push('/signin');
-  };
-
   // Handle post generation
   const handleGeneratePost = async () => {
     if (!userPrompt.trim()) {
@@ -97,8 +95,6 @@ function DashboardContent() {
 
     try {
       const response = await userQueriesAPI.generateContent(userPrompt, selectedModality, generateImage);
-      
-
       
       if (response.success && response.content) {
         let post_content = '';
@@ -150,14 +146,6 @@ function DashboardContent() {
     }
   };
 
-  const handleSelectGeneration = (generationId) => {
-    const generation = generations.find(g => g.id === generationId);
-    // Clear the "just created" flag when manually navigating
-    justCreatedGenerationId.current = null;
-    setCurrentGeneration(generation);
-    router.push(`/dashboard?id=${generationId}`, undefined, { shallow: true });
-  };
-
   const handleDeleteGeneration = (generationId) => {
     const updatedGenerations = generations.filter(g => g.id !== generationId);
     setGenerations(updatedGenerations);
@@ -167,13 +155,6 @@ function DashboardContent() {
       setCurrentGeneration(null);
       router.push('/dashboard', undefined, { shallow: true });
     }
-  };
-
-  const handleNewGeneration = () => {
-    // Clear the "just created" flag when starting new generation
-    justCreatedGenerationId.current = null;
-    setCurrentGeneration(null);
-    router.push('/dashboard', undefined, { shallow: true });
   };
 
   const handlePostChange = (e) => {
@@ -238,61 +219,19 @@ function DashboardContent() {
     }
   };
 
+  // Handle generation selection from the main content area (not sidebar)
+  const handleSelectGeneration = (generationId) => {
+    const generation = generations.find(g => g.id === generationId);
+    // Clear the "just created" flag when manually navigating
+    justCreatedGenerationId.current = null;
+    setCurrentGeneration(generation);
+    router.push(`/dashboard?id=${generationId}`, undefined, { shallow: true });
+  };
+
   return (
     <div className="min-h-screen bg-white flex">
-      {/* Minimalist Floating Sidebar */}
-      <div className="w-20 flex flex-col items-center py-4 space-y-3 border-r border-gray-100">
-        {/* New Generation Button */}
-        <button
-          onClick={handleNewGeneration}
-          className="w-16 h-16 bg-blue-500 text-white rounded-lg flex items-center justify-center hover:bg-blue-600 transition-colors shadow-md"
-          title="New Generation"
-        >
-          <Plus className="h-6 w-6" />
-        </button>
-        
-        {/* Generation History */}
-        <div className="flex flex-col space-y-2 max-h-[calc(100vh-200px)] overflow-y-auto">
-          {generations.slice(0, 10).map((generation) => (
-            <button
-              key={generation.id}
-              onClick={() => handleSelectGeneration(generation.id)}
-              className={`w-16 h-16 rounded-lg flex flex-col items-center justify-center p-1 transition-colors shadow-sm ${
-                generation.id === currentGenerationId
-                  ? 'bg-blue-100 text-blue-700 border-2 border-blue-300'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-              title={generation.userPrompt}
-            >
-              <span className="text-lg mb-1">
-                {modalityOptions.find(m => m.id === generation.selectedModality)?.emoji}
-              </span>
-              <span className="text-[10px] text-center leading-tight w-full px-1 overflow-hidden">
-                {generation.userPrompt.split(' ').slice(0, 2).join(' ')}
-                {generation.userPrompt.split(' ').length > 2 && '...'}
-              </span>
-            </button>
-          ))}
-        </div>
-        
-        {/* Upload PDFs Button */}
-        <button
-          onClick={() => setShowPDFUploader(true)}
-          className="w-16 h-16 bg-gray-100 text-gray-600 rounded-lg flex items-center justify-center hover:bg-gray-200 transition-colors shadow-sm"
-          title="Upload PDFs"
-        >
-          📎
-        </button>
-
-        {/* Sign Out Button */}
-        <button
-          onClick={handleSignOut}
-          className="w-16 h-16 bg-red-100 text-red-600 rounded-lg flex items-center justify-center hover:bg-red-200 transition-colors shadow-sm"
-          title="Sign Out"
-        >
-          <LogOut className="h-5 w-5" />
-        </button>
-      </div>
+      {/* Sidebar */}
+      <Sidebar currentPage="dashboard" />
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col">

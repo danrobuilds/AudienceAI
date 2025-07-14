@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api.routes import user_queries, uploads, auth
+from api.routes import user_queries, uploads, auth, company_data
 import os
 
 app = FastAPI()
@@ -25,6 +25,7 @@ app.add_middleware(
 app.include_router(uploads.router, prefix="/uploads", tags=["uploads"])
 app.include_router(user_queries.router, prefix="/queries", tags=["queries"])
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
+app.include_router(company_data.router, prefix="/api", tags=["company_data"])
 
 @app.get("/health")
 async def health():

@@ -59,4 +59,7 @@ def search_linkedin_posts(query: str) -> dict:
 
     except Exception as e:
         print(f"Error in search_linkedin_posts tool: {e}")
-        return {"error": f"Error retrieving viral posts: {str(e)}"} 
+        print(f"Exception type: {type(e).__name__}")
+        import traceback
+        print(f"Full traceback: {traceback.format_exc()}")
+        return {"error": f"Error retrieving viral posts: {str(e)} (Type: {type(e).__name__})"} 

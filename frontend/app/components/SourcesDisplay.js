@@ -10,19 +10,21 @@ function extractPDFSources(logs) {
   const pdfSources = [];
   const logText = Array.isArray(logs) ? logs.join('\n') : logs;
   
-  // Extract PDF sources from "Segment X:" pattern
-  const segmentPattern = /Segment \d+:\s*\n\s*File: (.+?\.pdf)\s*\n\s*Similarity: [\d.]+\s*\n\s*Document URL: (.+?)\s*\n/g;
+  // Match “Document Title: …” then any lines of content up to “Document URL: …”
+  const segmentPattern = 
+    /Document Title:\s*(.+?)\s*\nDocument Content:\s*([\s\S]+?)\s*\nDocument URL:\s*([^\s\n]+)/g;
   let match;
   
   while ((match = segmentPattern.exec(logText)) !== null) {
-    const filename = match[1].trim();
-    const url = match[2].trim();
+    const [, filename, rawContent, url] = match;
+    // collapse newlines in the snippet to a single space
+    const content = rawContent.trim().replace(/\s+/g, ' ');
     
-    // Only add if we haven't seen this filename before
-    if (!pdfSources.some(source => source.filename === filename)) {
+    if (!pdfSources.some(src => src.url === url)) {
       pdfSources.push({
-        filename: filename,
-        url: url
+        filename: filename.trim(),
+        content,
+        url: url.trim() !== 'None' ? url.trim() : null
       });
     }
   }
@@ -31,25 +33,26 @@ function extractPDFSources(logs) {
 }
 
 /**
- * Extract web article sources from logs
+ * Extract web article sources from logs produced by format_output_for_log("web_search")
  */
 function extractWebSources(logs) {
   const webSources = [];
   const logText = Array.isArray(logs) ? logs.join('\n') : logs;
   
-  // Extract web sources from "Result X:" pattern
-  const resultPattern = /Result \d+:\s*\n\s*Title: (.+?)\s*\n\s*URL: (.+?)\s*\n/g;
+  // Match “Web Title: …” then “Web Content: …” then “WebURL: …”
+  const resultPattern = 
+    /Web Title:\s*(.+?)\s*\nWeb Content:\s*([\s\S]+?)\s*\nWebURL:\s*([^\s\n]+)/g;
   let match;
   
   while ((match = resultPattern.exec(logText)) !== null) {
-    const title = match[1].trim();
-    const url = match[2].trim();
+    const [, title, rawContent, url] = match;
+    const content = rawContent.trim().replace(/\s+/g, ' ');
     
-    // Only add if we haven't seen this URL before
-    if (!webSources.some(source => source.url === url)) {
+    if (!webSources.some(src => src.url === url)) {
       webSources.push({
-        title: title,
-        url: url
+        title: title.trim(),
+        content,
+        url: url.trim()
       });
     }
   }
@@ -58,32 +61,26 @@ function extractWebSources(logs) {
 }
 
 /**
- * Extract viral post sources from logs
+ * Extract viral post sources from logs produced by format_output_for_log("search_linkedin_posts")
  */
 function extractViralPostSources(logs) {
   const viralSources = [];
   const logText = Array.isArray(logs) ? logs.join('\n') : logs;
   
-  // Extract viral posts from "Example X:" pattern
-  // Updated pattern to match the actual log format without Interactions field
-  const examplePattern = /Example \d+:\s*\n\s*Similarity: ([\d.]+)\s*\n\s*Content: (.+?)(?=\n\nExample|\nLinkedin viral content creation complete|$)/gs;
+  // Match “Post Content: …” then “Similarity Score: …”
+  const postPattern = 
+    /Post Content:\s*(.+?)\s*\nSimilarity Score:\s*([\d.]+)/g;
   let match;
   
-  while ((match = examplePattern.exec(logText)) !== null) {
-    const similarityScore = match[1].trim();
-    const content = match[2].trim();
+  while ((match = postPattern.exec(logText)) !== null) {
+    const [, rawContent, similarityScore] = match;
+    const content = rawContent.trim().replace(/\s+/g, ' ');
     
-    console.log('SourcesDisplay: Extracted viral post:', { similarityScore, content: content.substring(0, 100) });
-    
-    // Only add if we haven't seen this content before
-    if (!viralSources.some(source => source.content === content)) {
-      // Use first 100 characters as title
-      const title = content.substring(0, 100) + (content.length > 100 ? '...' : '');
-      
+    if (!viralSources.some(src => src.content === content)) {
       viralSources.push({
-        title: title,
-        content: content,
-        similarityScore: similarityScore,
+        title: content.slice(0, 100) + (content.length > 100 ? '...' : ''),
+        content,
+        similarityScore: similarityScore.trim()
       });
     }
   }
@@ -141,16 +138,23 @@ const SourcesDisplay = ({ sources, logs }) => {
             <div key={index} className="text-xs text-gray-600 bg-white p-2 rounded border-l-2 border-blue-300">
               <div className="flex items-center justify-between">
                 <span>📄 {pdf.filename}</span>
-                {pdf.url && (
-                  <a 
-                    href={pdf.url} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="text-blue-600 hover:text-blue-800 ml-2"
-                  >
-                    <ExternalLink className="h-3 w-3" />
-                  </a>
-                )}
+                <div className="flex items-center gap-2">
+                  {pdf.similarityScore && (
+                    <span className="text-blue-600">
+                      {Math.round(pdf.similarityScore * 100)}%
+                    </span>
+                  )}
+                  {pdf.url && (
+                    <a 
+                      href={pdf.url} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:text-blue-800"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
+                </div>
               </div>
             </div>
           ))}
@@ -176,7 +180,6 @@ const SourcesDisplay = ({ sources, logs }) => {
               <div className="flex items-center justify-between">
                 <span>💼 {post.title}</span>
                 <div className="flex items-center gap-2 ml-2">
-  
                   {post.similarityScore && (
                     <span className="text-purple-600">
                       {Math.round(post.similarityScore * 100)}%
@@ -184,6 +187,16 @@ const SourcesDisplay = ({ sources, logs }) => {
                   )}
                 </div>
               </div>
+              {post.targetAudience && (
+                <div className="text-xs text-gray-500 mt-1">
+                  <strong>Target:</strong> {post.targetAudience.substring(0, 50)}...
+                </div>
+              )}
+              {post.mediaDescription && (
+                <div className="text-xs text-gray-500 mt-1">
+                  <strong>Media:</strong> {post.mediaDescription.substring(0, 50)}...
+                </div>
+              )}
             </div>
           ))}
         </div>

@@ -2,13 +2,11 @@ import os
 from services.embeddings_service import shared_embeddings
 from services.supabase_service import supabase
 
+# Search the internal PDF document library using Supabase vector similarity search.
+
 def search_document_library(query: str, tenant_id: str = "") -> dict:
-    """
-    Search the internal PDF document library using Supabase vector similarity search.
-    query (str): The topic or keywords to search for in the documents.
-    tenant_id (str): Tenant ID for multi-tenant document search.
-    Returns: dict: Dictionary containing document segments with metadata and content.
-    """
+    
+
     print(f"Tool: Searching document library with query: '{query}' for tenant: '{tenant_id}'")
     
     if shared_embeddings is None:

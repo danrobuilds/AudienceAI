@@ -10,14 +10,6 @@ async def gather_information(user_prompt_text: str, llm, async_log_callback=None
     """
     Agent 1: Gather comprehensive information relevant to the user's request.
     
-    Args:
-        user_prompt_text: The user's request for creating a LinkedIn post
-        llm: The language model instance
-        async_log_callback: Optional logging callback function
-        formatted_context: Pre-formatted company context from orchestrator
-    
-    Returns:
-        String containing gathered information
     """
     async def _log(message):
         if async_log_callback:
@@ -33,19 +25,15 @@ async def gather_information(user_prompt_text: str, llm, async_log_callback=None
         tool_choice="auto"
     )
     
-    info_system_message = f"""You are a marketing research assistant for a company. Here is context about the company: {company_context} 
+    info_system_message = f"""
+    
+    {company_context} 
     
     Your task is to gather comprehensive information relevant to the user's request for creating a social media post.
 
-    Use the available tools to:
-    1. Search the document library for relevant company/internal information
-    2. Perform web searches to COMPLEMENT the information from the document library (this can include recent news, market research, industry insights, trends, and other relevant web content)
-    2a. Use web searches as an opportunity to search for information that is not already present in the document library.
+    USE ONLY WHAT IS STRICTLY NECESSARY TO REMAIN FOCUSED ON THE USER'S REQUEST.
 
-    Be thorough in your information gathering, and be efficent. Never call a single tool more than 2 times. Call multiple tools with different, but comprehensive, queries to get a wide range of relevant information.
-    Your goal is to collect as much relevant context as possible, not to create the post yet.
-
-    After gathering information, provide a detailed summary INCLUDING KEY FACTS AND NUMBERS of all the relevant information you found in a loose, unstructured format.
+    After gathering information, provide a detailed summary INCLUDING KEY FACTS AND NUMBERS of the most relevant information.
     """
     
     messages = [
@@ -53,39 +41,42 @@ async def gather_information(user_prompt_text: str, llm, async_log_callback=None
         HumanMessage(content=f"Gather comprehensive information for creating a social media post about: {user_prompt_text}")
     ]
     
-    # Track tool call count
-    total_tool_calls = 0
-    max_tool_calls = 3  # Limit to 3 tool calls maximum
+    # Simple limits
+    max_rounds = 5
     
-    # Initial LLM call for information gathering
     try:
-        await _log("Invoking LLM for information gathering...")
-        info_response = await asyncio.wait_for(llm_with_info_tools.ainvoke(messages), timeout=60.0)
-        messages.append(info_response)
-        
-        # Process tool calls if any
-        if info_response.tool_calls:
-            tool_count = len(info_response.tool_calls)
-            total_tool_calls += tool_count
+        for round_num in range(max_rounds):
+            await _log(f"Round {round_num + 1}: Gathering information...")
             
-            await _log(f"LLM requesting {tool_count} tool calls (total so far: {total_tool_calls})")
+            response = await llm_with_info_tools.ainvoke(messages)
+            messages.append(response)
             
-            # Check if we're exceeding reasonable limits
-            if total_tool_calls > max_tool_calls:
-                await _log(f"WARNING: High number of tool calls ({total_tool_calls}). This may indicate inefficient research strategy.")
-            
-            tool_messages, _ = await call_mcp_tools(info_response, async_log_callback, tenant_id)
+            # If no tool calls, we're done
+            if not response.tool_calls:
+                return response.content
+                
+            # Execute tool calls
+            tool_messages, _ = await call_mcp_tools(response, async_log_callback, tenant_id)
             messages.extend(tool_messages)
             
-            # Get final information summary
-            final_info_response = await asyncio.wait_for(llm_with_info_tools.ainvoke(messages), timeout=60.0)
-            gathered_info = final_info_response.content
-        else:
-            gathered_info = info_response.content
+            # Call LLM again to process tool results
+            await _log(f"Processing tool results...")
+            follow_up_response = await llm_with_info_tools.ainvoke(messages + [
+                HumanMessage(content="If this information does not fully satisfy the user's request, continue searching. Otherwise, provide a detailed summary.")
+            ])
+            messages.append(follow_up_response)
             
-        await _log(f"Information gathering complete. Used {total_tool_calls} tool calls. Gathered info preview: {str(gathered_info)[:200]}...")
-        return gathered_info
+            # If no more tool calls, we're done
+            if not follow_up_response.tool_calls:
+                return follow_up_response.content
+        
+        # If we hit max rounds, get final summary
+        final_response = await llm_with_info_tools.ainvoke(messages + [
+            HumanMessage(content="Provide your final summary of the relevant information gathered.")
+        ])
+        
+        return final_response.content
         
     except Exception as e:
-        await _log(f"Error during information gathering: {e}")
-        return f"Information gathering encountered an error: {e}. Proceeding with available information." 
+        await _log(f"Error: {e}")
+        return f"Information gathering error: {e}" 

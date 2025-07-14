@@ -197,6 +197,61 @@ export const uploadsAPI = {
   }
 };
 
+// Company API endpoints
+export const companyDataAPI = {
+  /**
+   * Get company data from tenants table
+   */
+  async getCompanyData() {
+    try {
+      const tenantId = getTenantId();
+      
+      if (!tenantId) {
+        throw new Error('No tenant ID found. Please sign in again.');
+      }
+      
+      console.log("Fetching company data...");
+      const response = await apiClient.get(`/api/company_data/data?tenant_id=${tenantId}`);
+      
+      console.log("Company data response received:", response.data);
+      return response.data;
+    } catch (error) {
+      console.error("Company data fetch failed:", error);
+      throw new Error(
+        error.response?.data?.message || 
+        error.message || 
+        'Failed to fetch company data'
+      );
+    }
+  },
+
+  /**
+   * Update company data in tenants table
+   */
+  async updateCompanyData(data) {
+    try {
+      const tenantId = getTenantId();
+      
+      if (!tenantId) {
+        throw new Error('No tenant ID found. Please sign in again.');
+      }
+      
+      console.log("Updating company data...");
+      const response = await apiClient.post(`/api/company_data/data?tenant_id=${tenantId}`, data);
+      
+      console.log("Company data update response received:", response.data);
+      return response.data;
+    } catch (error) {
+      console.error("Company data update failed:", error);
+      throw new Error(
+        error.response?.data?.message || 
+        error.message || 
+        'Failed to update company data'
+      );
+    }
+  }
+};
+
 // Auth API endpoints
 export const authAPI = {
   /**

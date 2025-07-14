@@ -31,7 +31,7 @@ def web_search(query: str) -> dict:
         
         # Format the results
         web_results = []
-        for i, result in enumerate(response.results[:5]):  # Limit to top 5 results
+        for i, result in enumerate(response.results[:3]):  # Limit to top 5 results
             try:
                 # Handle both text and image results
                 if hasattr(result, 'type') and result.type == 'image':
@@ -39,7 +39,7 @@ def web_search(query: str) -> dict:
                 
                 title = getattr(result, 'name', '') or getattr(result, 'title', 'No title available')
                 url = getattr(result, 'url', 'No URL available')
-                content = getattr(result, 'content', '') or getattr(result, 'snippet', '') or 'No content available'
+                content = getattr(result, 'content', '') or 'No content available'
                 
                 web_result = {
                     "result_number": i + 1,

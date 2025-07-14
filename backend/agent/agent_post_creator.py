@@ -1,26 +1,13 @@
 import asyncio
 import uuid
 from langchain_core.messages import SystemMessage, HumanMessage
-from tools.tool_calling import (
-    search_linkedin_posts_mcp_tool_def, 
-    call_mcp_tools
-)
+from tools.tool_calling import (search_linkedin_posts_mcp_tool_def, call_mcp_tools)
+
+
+# AGENT 2: Create viral social media content using modality-specific tools and strategies.
 
 async def create_viral_post(user_prompt_text: str, gathered_info: str, llm, async_log_callback=None, company_context: str = "", modality: str = "linkedin", tenant_id: str = ""):
-    """
-    Agent 2: Create viral social media content using modality-specific tools and strategies.
-    
-    Args:
-        user_prompt_text: The original user request
-        gathered_info: Information gathered by the info gathering agent
-        llm: The language model instance
-        async_log_callback: Optional logging callback function
-        company_context: Company context from orchestrator
-        modality: Social media platform (linkedin, twitter, tiktok, instagram)
-    
-    Returns:
-        Dict containing post content and image description
-    """
+   
     async def _log(message):
         if async_log_callback:
             await asyncio.wait_for(async_log_callback(message), timeout=5.0)
@@ -39,16 +26,24 @@ async def create_viral_post(user_prompt_text: str, gathered_info: str, llm, asyn
     system_message = get_system_message_for_modality(modality, company_context)
     
     messages = [
-        SystemMessage(content=system_message + "You are a social media marketing expert for a company. Here is context about the company: " + company_context),
-        HumanMessage(content=f"""Original request: {user_prompt_text}
+        SystemMessage(content= f"""
+            {system_message}
 
-        Gathered Information: {gathered_info}
+            {company_context}
 
-        First, create a comprehensive content brief that captures the essence of what you're communicating, then use the {modality} post search tool to find relevant examples of successful posts.
+            """),
         
-        After gathering examples, I'll ask you to create the final structured content.
+        HumanMessage(content=f"""
+                     
+            Original request: {user_prompt_text}
 
-        """)
+            Gathered Information: {gathered_info}
+
+            Draw from relevant examples of successful posts. Pick the most relevant example and copy the format exactly. This will lay the groundwork for creating the text and image for marketing content that satisfies the user's original request.
+            
+            After gathering examples, I'll ask you to create the final structured content.
+
+            """)
     ]
     
     try:
@@ -74,11 +69,11 @@ async def create_viral_post(user_prompt_text: str, gathered_info: str, llm, asyn
                 "properties": {
                     "post_content": {
                         "type": "string",
-                        "description": f"The viral {modality} post content that satisfies the user's original request"
+                        "description": f"The viral {modality} post content that satisfies the user's original request according to the examples of successful {modality} posts. Post content should complement the image, not be a duplicate of it."
                     },
                     "image_description": {
                         "type": "string", 
-                        "description": f"Detailed description for generating a compelling image for this {modality} post, including style, composition, colors, and visual elements"
+                        "description": f"Detailed description for generating a compelling image for this {modality} post, including the purpose of the image, data, words, and information, type, visual elements, style, composition, colors, and any other relevant details."
                     }
                 },
                 "required": ["post_content", "image_description"],
@@ -89,21 +84,18 @@ async def create_viral_post(user_prompt_text: str, gathered_info: str, llm, asyn
         llm_structured = llm.with_structured_output(structured_schema)
         
         # Add final instruction for structured output
-        messages.append(HumanMessage(content=f"""Now create the final viral {modality} content that satisfies the user's original request exactly using all the information gathered.
-        
-            IMPORTANT: Format the content based on the provided examples of successful {modality} posts.
+        messages.append(HumanMessage(content=f"""
 
-            YOUR RESPONSE MUST INCLUDE:
-            1. post_content: The viral {modality} post content that satisfies the user's original request
-            2. image_description: A detailed description for generating a compelling image that would enhance this post's engagement
-            
-            Focus on creating both high-quality post content and a vivid image description that complements the post.
+            Now create the final viral {modality} content that satisfies the user's original request exactly using all the information gathered.
+        
+            IMPORTANT: Format the content and image in tandem based on the provided examples of successful {modality} posts. They should complement each other and not be repetitive.
+            The post and image shoudl function as a single unit and NOT be repetitive.
             """))
         
         await _log(f"Invoking LLM for structured {modality} content creation...")
         structured_response = await asyncio.wait_for(llm_structured.ainvoke(messages), timeout=120.0)
         
-        await _log(f"{modality.title()} content creation complete. Used {tool_call_count} tool calls.")
+        await _log(f"{modality.title()} content creation complete. Used {tool_call_count} tool calls. Image description: {structured_response['image_description']}")
         
         return structured_response
         
@@ -142,7 +134,8 @@ def get_system_message_for_modality(modality: str, company_context: str):
         
         YOUR TASK is to create a single viral LinkedIn post exactly as specified in the ORIGINAL QUERY using the provided information and tools.
 
-        Use the provided tools to find examples of successful LinkedIn posts based on the type of information provided (a post about a leader should be based on the format of a successful posts about leaders)
+        Use the provided tools to find examples of successful LinkedIn posts based on the type of information provided 
+        (a post about a leader should be based on the format of a successful posts about leaders)
         
         """
 
@@ -159,23 +152,6 @@ def get_system_message_for_modality(modality: str, company_context: str):
         - Uses emojis strategically
 
         If creating a thread, number each tweet (1/x format).
-        """
-
-    elif modality == "tiktok":
-        return """YOUR TASK is to create a viral TikTok video script using the provided information and trending elements.
-
-        1. Research trending TikTok content, sounds, and effects related to the topic.
-        2. Create a compelling TikTok video script that:
-        - Has a strong hook in the first 3 seconds
-        - Uses trending sounds or audio cues
-        - Includes visual direction and text overlays
-        - Leverages popular TikTok formats (day in the life, behind the scenes, etc.)
-        - Uses trending hashtags (#fyp #viral #business)
-        - Is 15-60 seconds in length
-        - Includes calls-to-action for follows/engagement
-
-        Format: [SCENE] - [ACTION] - [TEXT OVERLAY] - [AUDIO/SOUND]
-        If suggesting specific trending sounds, include: "Suggested Sound: [description]"
         """
 
     elif modality == "instagram":

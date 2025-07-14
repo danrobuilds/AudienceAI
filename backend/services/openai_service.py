@@ -12,5 +12,7 @@ def initialize_llm():
         model="gpt-4o", 
         request_timeout=120.0, 
         temperature=0.9,
+        presence_penalty=0.3,
+        frequency_penalty=0.3,
         model_kwargs={"response_format": {"type": "text"}}
     ) 

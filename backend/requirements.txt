@@ -21,3 +21,5 @@ beautifulsoup4
 supabase
 openai
 linkup-sdk
+mermaid-py
+Pillow
