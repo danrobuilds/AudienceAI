@@ -28,15 +28,13 @@ const Sidebar = ({ currentPage = 'dashboard' }) => {
       }
     }
 
-    // Get current generation ID from URL if on dashboard
-    if (currentPage === 'dashboard') {
-      const urlParams = new URLSearchParams(window.location.search);
-      const generationId = urlParams.get('id');
-      if (generationId) {
-        setCurrentGenerationId(generationId);
-      }
+    // Get current generation ID from URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const generationId = urlParams.get('id');
+    if (generationId) {
+      setCurrentGenerationId(generationId);
     }
-  }, [currentPage]);
+  }, []);
 
   const handleNavigate = (page) => {
     if (page === 'dashboard') {
@@ -94,43 +92,38 @@ const Sidebar = ({ currentPage = 'dashboard' }) => {
       {/* Separator */}
       <div className="w-12 h-px bg-gray-200 my-2"></div>
 
-      {/* Dashboard-specific actions */}
-      {currentPage === 'dashboard' && (
-        <>
-          {/* New Generation Button */}
+      {/* New Generation Button */}
+      <button
+        onClick={handleNewGeneration}
+        className="w-16 h-16 bg-blue-500 text-white rounded-lg flex items-center justify-center hover:bg-blue-600 transition-colors shadow-md"
+        title="New Generation"
+      >
+        <Plus className="h-6 w-6" />
+      </button>
+      
+      {/* Generation History */}
+      <div className="flex flex-col space-y-2 max-h-[calc(100vh-400px)] overflow-y-auto">
+        {generations.slice(0, 10).map((generation) => (
           <button
-            onClick={handleNewGeneration}
-            className="w-16 h-16 bg-blue-500 text-white rounded-lg flex items-center justify-center hover:bg-blue-600 transition-colors shadow-md"
-            title="New Generation"
+            key={generation.id}
+            onClick={() => handleSelectGeneration(generation.id)}
+            className={`w-16 h-16 rounded-lg flex flex-col items-center justify-center p-1 transition-colors shadow-sm ${
+              generation.id === currentGenerationId
+                ? 'bg-blue-100 text-blue-700 border-2 border-blue-300'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+            title={generation.userPrompt}
           >
-            <Plus className="h-6 w-6" />
+            <span className="text-lg mb-1">
+              {modalityOptions.find(m => m.id === generation.selectedModality)?.emoji}
+            </span>
+            <span className="text-[10px] text-center leading-tight w-full px-1 overflow-hidden">
+              {generation.userPrompt.split(' ').slice(0, 2).join(' ')}
+              {generation.userPrompt.split(' ').length > 2 && '...'}
+            </span>
           </button>
-          
-          {/* Generation History */}
-          <div className="flex flex-col space-y-2 max-h-[calc(100vh-400px)] overflow-y-auto">
-            {generations.slice(0, 10).map((generation) => (
-              <button
-                key={generation.id}
-                onClick={() => handleSelectGeneration(generation.id)}
-                className={`w-16 h-16 rounded-lg flex flex-col items-center justify-center p-1 transition-colors shadow-sm ${
-                  generation.id === currentGenerationId
-                    ? 'bg-blue-100 text-blue-700 border-2 border-blue-300'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-                title={generation.userPrompt}
-              >
-                <span className="text-lg mb-1">
-                  {modalityOptions.find(m => m.id === generation.selectedModality)?.emoji}
-                </span>
-                <span className="text-[10px] text-center leading-tight w-full px-1 overflow-hidden">
-                  {generation.userPrompt.split(' ').slice(0, 2).join(' ')}
-                  {generation.userPrompt.split(' ').length > 2 && '...'}
-                </span>
-              </button>
-            ))}
-          </div>
-        </>
-      )}
+        ))}
+      </div>
 
       {/* Sign Out Button */}
       <div className="mt-auto">

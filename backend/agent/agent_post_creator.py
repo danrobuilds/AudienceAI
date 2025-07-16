@@ -1,7 +1,7 @@
 import asyncio
 import uuid
 from langchain_core.messages import SystemMessage, HumanMessage
-from tools.tool_calling import (search_linkedin_posts_mcp_tool_def, call_mcp_tools)
+from tools.tool_calling import (search_linkedin_posts_mcp_tool_def, search_blog_posts_mcp_tool_def, call_mcp_tools)
 
 
 # AGENT 2: Create viral social media content using modality-specific tools and strategies.
@@ -120,7 +120,7 @@ def get_tools_for_modality(modality: str):
     elif modality == "instagram":
         return [search_linkedin_posts_mcp_tool_def]  # Temporary fallback
     elif modality == "blog":
-        return [search_linkedin_posts_mcp_tool_def]  # Blog posts can reference LinkedIn content for professional insights
+        return [search_blog_posts_mcp_tool_def]  # Blog posts can reference LinkedIn content for professional insights
     else:
         return [search_linkedin_posts_mcp_tool_def]
 
@@ -184,13 +184,6 @@ def get_system_message_for_modality(modality: str, company_context: str):
         - Incorporates relevant keywords naturally
         - Is 800-2000 words in length
         - Includes calls-to-action where appropriate
-
-        Structure your blog post with:
-        - Title (H1)
-        - Introduction
-        - Main sections with subheadings (H2/H3)
-        - Conclusion
-        - Key takeaways or summary
 
         Focus on providing value to the reader while maintaining professional credibility.
         """

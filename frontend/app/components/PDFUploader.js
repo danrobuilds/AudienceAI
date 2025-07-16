@@ -52,7 +52,8 @@ const PDFUploader = ({ isOpen, onClose }) => {
 
     try {
       const results = await uploadsAPI.uploadMultiple(files, (progress) => {
-        setUploadProgress(progress);
+        // Cap progress at 99% during upload process
+        setUploadProgress(Math.min(progress, 99));
       });
 
       // Transform API response to match our UI format
@@ -76,7 +77,7 @@ const PDFUploader = ({ isOpen, onClose }) => {
       }]);
     } finally {
       setUploading(false);
-      setUploadProgress(0);
+      setUploadProgress(100);
     }
   };
 

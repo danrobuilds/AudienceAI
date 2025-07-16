@@ -16,6 +16,7 @@ function DashboardContent() {
   
   // State management
   const [userPrompt, setUserPrompt] = useState("");
+  const [followupPrompt, setFollowupPrompt] = useState("");
   const [processing, setProcessing] = useState(false);
   const [showPDFUploader, setShowPDFUploader] = useState(false);
   const [selectedModality, setSelectedModality] = useState("linkedin");
@@ -23,7 +24,11 @@ function DashboardContent() {
   const [generations, setGenerations] = useState([]);
   const [currentGeneration, setCurrentGeneration] = useState(null);
   const [logsExpanded, setLogsExpanded] = useState(false);
+  const [processingSteps, setProcessingSteps] = useState([]);
+  const [isInitialGeneration, setIsInitialGeneration] = useState(false);
   const textareaRef = useRef(null);
+  const userPromptRef = useRef(null);
+  const followupPromptRef = useRef(null);
   const justCreatedGenerationId = useRef(null);
 
   // Modality options
@@ -43,6 +48,29 @@ function DashboardContent() {
         generatedImages: [] // Don't store images in localStorage to avoid size limits
       }));
     localStorage.setItem('audienceai_generations', JSON.stringify(generationsForStorage));
+  };
+
+  // Simulate processing steps for better UX
+  const simulateProcessingSteps = (isFollowup = false) => {
+    const steps = isFollowup ? [
+      'Analyzing your modification request...',
+      'Updating content strategy...',
+      'Refining the content...',
+      'Finalizing changes...'
+    ] : [
+      'Understanding your request...',
+      'Researching relevant information...',
+      'Crafting content optimized for your audience...',
+      'Writing final output...'
+    ];
+    
+    setProcessingSteps([]);
+    
+    steps.forEach((step, index) => {
+      setTimeout(() => {
+        setProcessingSteps(prev => [...prev, { text: step, completed: false }]);
+      }, index * 10000);
+    });
   };
 
   // Load generations from localStorage and handle URL changes
@@ -84,6 +112,24 @@ function DashboardContent() {
     }
   }, [currentGeneration?.generatedPost]);
 
+  // Auto-resize user prompt textarea
+  useEffect(() => {
+    const textarea = userPromptRef.current;
+    if (textarea) {
+      textarea.style.height = 'auto';
+      textarea.style.height = Math.max(textarea.scrollHeight, 48) + 'px'; // min height of 48px (h-12)
+    }
+  }, [userPrompt]);
+
+  // Auto-resize follow-up prompt textarea
+  useEffect(() => {
+    const textarea = followupPromptRef.current;
+    if (textarea) {
+      textarea.style.height = 'auto';
+      textarea.style.height = Math.max(textarea.scrollHeight, 48) + 'px'; // min height of 48px (h-12)
+    }
+  }, [followupPrompt]);
+
   // Handle post generation
   const handleGeneratePost = async () => {
     if (!userPrompt.trim()) {
@@ -92,6 +138,24 @@ function DashboardContent() {
     }
 
     setProcessing(true);
+    setIsInitialGeneration(true);
+    simulateProcessingSteps(false);
+
+    // Create a pending generation immediately and switch to content view
+    const generationId = Date.now().toString();
+    const pendingGeneration = {
+      id: generationId,
+      userPrompt: userPrompt,
+      selectedModality: selectedModality,
+      generatedPost: '',
+      generatedImages: [],
+      logs: [],
+      timestamp: new Date().toISOString(),
+      isLoading: true
+    };
+
+    setCurrentGeneration(pendingGeneration);
+    router.push(`/dashboard?id=${generationId}`, undefined, { shallow: true });
 
     try {
       const response = await userQueriesAPI.generateContent(userPrompt, selectedModality, generateImage);
@@ -114,35 +178,37 @@ function DashboardContent() {
           post_content = response.content;
         }
         
-        const generationId = Date.now().toString();
-        const newGeneration = {
+        const completedGeneration = {
           id: generationId,
           userPrompt: userPrompt,
           selectedModality: selectedModality,
           generatedPost: post_content,
           generatedImages: generated_images,
           logs: logs,
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          isLoading: false
         };
 
-        const updatedGenerations = [newGeneration, ...generations].slice(0, 5);
+        const updatedGenerations = [completedGeneration, ...generations].slice(0, 5);
         setGenerations(updatedGenerations);
         saveGenerationsToStorage(updatedGenerations);
 
         // Track this generation as just created (has images in memory)
         justCreatedGenerationId.current = generationId;
 
-        // Set current generation and update URL
-        setCurrentGeneration(newGeneration);
-        router.push(`/dashboard?id=${generationId}`, undefined, { shallow: true });
+        // Update current generation
+        setCurrentGeneration(completedGeneration);
         
         // Reset form
         setUserPrompt("");
       }
     } catch (error) {
       console.error("Generation error:", error);
+      // Handle error - could show error state in the content view
     } finally {
       setProcessing(false);
+      setIsInitialGeneration(false);
+      setProcessingSteps([]);
     }
   };
 
@@ -169,15 +235,23 @@ function DashboardContent() {
     saveGenerationsToStorage(updatedGenerations);
   };
 
-  const handleRegenerate = async () => {
-    if (!currentGeneration) return;
+  const handleFollowup = async () => {
+    if (!currentGeneration || !followupPrompt.trim()) return;
     setProcessing(true);
+    simulateProcessingSteps(true);
     
     try {
-      const response = await userQueriesAPI.generateContent(
-        currentGeneration.userPrompt,
-        currentGeneration.selectedModality,
-        currentGeneration.generateImage
+      // Prepare existing content for the followup API
+      const existingContent = {
+        post_content: currentGeneration.generatedPost,
+        modality: currentGeneration.selectedModality,
+        image_description: currentGeneration.imageDescription || ""
+      };
+      
+      const response = await userQueriesAPI.followupQuery(
+        followupPrompt,
+        existingContent,
+        currentGeneration.selectedModality
       );
       
       if (response.success && response.content) {
@@ -211,11 +285,15 @@ function DashboardContent() {
         );
         setGenerations(updatedGenerations);
         saveGenerationsToStorage(updatedGenerations);
+        
+        // Clear the follow-up prompt
+        setFollowupPrompt("");
       }
     } catch (error) {
-      console.error('Regeneration error:', error);
+      console.error('Follow-up error:', error);
     } finally {
       setProcessing(false);
+      setProcessingSteps([]);
     }
   };
 
@@ -226,6 +304,22 @@ function DashboardContent() {
     justCreatedGenerationId.current = null;
     setCurrentGeneration(generation);
     router.push(`/dashboard?id=${generationId}`, undefined, { shallow: true });
+  };
+
+  // Handle key press for user prompt
+  const handleUserPromptKeyPress = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !processing) {
+      e.preventDefault();
+      handleGeneratePost();
+    }
+  };
+
+  // Handle key press for follow-up prompt
+  const handleFollowupPromptKeyPress = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !processing) {
+      e.preventDefault();
+      handleFollowup();
+    }
   };
 
   return (
@@ -242,22 +336,10 @@ function DashboardContent() {
             <div className="p-6 border-b border-gray-100">
               <div className="flex items-center justify-between">
                 <div>
-                  <h1 className="text-2xl font-semibold text-gray-900">Content Created</h1>
+                  <h1 className="text-2xl font-semibold text-gray-900">
+                    {currentGeneration.isLoading ? 'Creating Content...' : 'Content Created'}
+                  </h1>
                 </div>
-                <button
-                  onClick={handleRegenerate}
-                  disabled={processing}
-                  className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 transition-colors"
-                >
-                  {processing ? (
-                    <div className="flex items-center">
-                      <Loader className="animate-spin h-4 w-4 mr-2" />
-                      Regenerating...
-                    </div>
-                  ) : (
-                    'Regenerate'
-                  )}
-                </button>
               </div>
             </div>
 
@@ -265,21 +347,95 @@ function DashboardContent() {
             <div className="flex-1 overflow-auto p-6">
               <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-5 gap-8">
                 {/* Left Column - Details */}
-                <div className="lg:col-span-2">
-                  <h2 className="text-lg font-semibold mb-4">Details</h2>
-                  
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        My Task
-                      </label>
-                      <textarea
-                        value={currentGeneration.userPrompt}
-                        readOnly
-                        className="w-full h-20 p-3 border border-gray-200 rounded-lg bg-gray-50 text-gray-700 resize-none"
-                      />
-                    </div>
+                <div className="lg:col-span-2 space-y-6">
+                  <div>
+                    <h2 className="text-lg font-semibold mb-4">Details</h2>
+                    
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          My Task
+                        </label>
+                        <textarea
+                          value={currentGeneration.userPrompt}
+                          readOnly
+                          className="w-full h-20 p-3 border border-gray-200 rounded-lg bg-gray-50 text-gray-700"
+                        />
+                      </div>
 
+                      {/* Modify Content Section */}
+                      {!currentGeneration.isLoading && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Modify Content
+                          </label>
+                          <div className="flex items-start gap-2">
+                            <textarea
+                              ref={followupPromptRef}
+                              value={followupPrompt}
+                              onChange={(e) => setFollowupPrompt(e.target.value)}
+                              onKeyPress={handleFollowupPromptKeyPress}
+                              placeholder="Ask me to modify this content..."
+                              className="flex-1 min-h-[48px] max-h-[120px] px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none text-sm"
+                              rows="1"
+                              disabled={processing}
+                            />
+                            <button
+                              onClick={handleFollowup}
+                              disabled={processing || !followupPrompt.trim()}
+                              className="h-12 px-4 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium text-sm whitespace-nowrap"
+                            >
+                              {processing ? (
+                                <div className="flex items-center">
+                                  <Loader className="animate-spin h-4 w-4 mr-2" />
+                                  Updating...
+                                </div>
+                              ) : (
+                                'Update'
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Inline Loading Indicators */}
+                      {processing && processingSteps.length > 0 && (
+                        <div className="border border-blue-200 rounded-lg p-4 bg-blue-50">
+                          <div className="flex items-center gap-2 mb-3">
+                            <span className="text-sm font-medium text-blue-900">
+                              {isInitialGeneration ? 'Creating your content...' : 'Updating your content...'}
+                            </span>
+                          </div>
+                          <div className="space-y-2">
+                            {processingSteps.map((step, index) => (
+                              <div key={index} className="flex items-center gap-2">
+                                <div className="flex-shrink-0">
+                                  {step.completed ? (
+                                    <div className="w-4 h-4 bg-green-500 rounded-full flex items-center justify-center">
+                                      <svg className="w-2 h-2 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                      </svg>
+                                    </div>
+                                  ) : (
+                                    <div className="w-4 h-4 bg-blue-500 rounded-full flex items-center justify-center">
+                                      <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div>
+                                    </div>
+                                  )}
+                                </div>
+                                <p className="text-xs text-blue-800">{step.text}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Spacer to push platform info to align with bottom of content */}
+                  <div className="flex-1"></div>
+
+                  {/* Platform, Created, Logs, and Sources - positioned at bottom */}
+                  <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Platform
@@ -298,45 +454,54 @@ function DashboardContent() {
                         {new Date(currentGeneration.timestamp).toLocaleString()}
                       </div>
                     </div>
+
+                    {/* Logs Dropdown */}
+                    {currentGeneration.logs && currentGeneration.logs.length > 0 && (
+                      <div>
+                        <button
+                          onClick={() => setLogsExpanded(!logsExpanded)}
+                          className="flex items-center justify-between w-full text-left text-sm font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 p-3 rounded-lg transition-colors"
+                        >
+                          <span>Logs</span>
+                          {logsExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                        </button>
+                        {logsExpanded && (
+                          <div className="mt-2 p-3 bg-gray-50 rounded-lg max-h-60 overflow-y-auto">
+                            <pre className="text-xs text-gray-700 whitespace-pre-wrap">
+                              {Array.isArray(currentGeneration.logs) ? currentGeneration.logs.join('\n') : currentGeneration.logs}
+                            </pre>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Sources Display */}
+                    {currentGeneration.logs && currentGeneration.logs.length > 0 && (
+                      <SourcesDisplay logs={currentGeneration.logs} />
+                    )}
                   </div>
-
-                  {/* Logs Dropdown */}
-                  {currentGeneration.logs && currentGeneration.logs.length > 0 && (
-                    <div className="mt-6">
-                      <button
-                        onClick={() => setLogsExpanded(!logsExpanded)}
-                        className="flex items-center justify-between w-full text-left text-sm font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 p-3 rounded-lg transition-colors"
-                      >
-                        <span>Logs</span>
-                        {logsExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                      </button>
-                      {logsExpanded && (
-                        <div className="mt-2 p-3 bg-gray-50 rounded-lg max-h-60 overflow-y-auto">
-                          <pre className="text-xs text-gray-700 whitespace-pre-wrap">
-                            {Array.isArray(currentGeneration.logs) ? currentGeneration.logs.join('\n') : currentGeneration.logs}
-                          </pre>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Sources Display */}
-                  {currentGeneration.logs && currentGeneration.logs.length > 0 && (
-                    <SourcesDisplay logs={currentGeneration.logs} />
-                  )}
                 </div>
 
                 {/* Right Column - Generated Content */}
                 <div className="lg:col-span-3">
                   <h2 className="text-lg font-semibold mb-4">Content</h2>
                   
-                  <textarea
-                    ref={textareaRef}
-                    value={currentGeneration.generatedPost}
-                    onChange={handlePostChange}
-                    placeholder="Generated post content..."
-                    className="w-full min-h-[400px] p-4 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-                  />
+                  {currentGeneration.isLoading ? (
+                    <div className="w-full min-h-[400px] border border-gray-200 rounded-lg p-4 bg-gray-50 flex items-center justify-center">
+                      <div className="text-center">
+                        <Loader className="animate-spin h-8 w-8 text-blue-500 mx-auto mb-4" />
+                        <p className="text-gray-600">Your content is being written...</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <textarea
+                      ref={textareaRef}
+                      value={currentGeneration.generatedPost}
+                      onChange={handlePostChange}
+                      placeholder="Generated post content..."
+                      className="w-full min-h-[400px] p-4 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                    />
+                  )}
 
                   {/* Generated Images */}
                   {currentGeneration.generatedImages && currentGeneration.generatedImages.length > 0 && (
@@ -379,15 +544,16 @@ function DashboardContent() {
               <h2 className="text-2xl text-gray-600 mb-4">What should I work on?</h2>
               
               {/* Input */}
-              <div className="flex items-center gap-4 mb-6">
+              <div className="flex items-start gap-4 mb-6">
                 <div className="flex-1">
-                  <input
-                    type="text"
+                  <textarea
+                    ref={userPromptRef}
                     value={userPrompt}
                     onChange={(e) => setUserPrompt(e.target.value)}
+                    onKeyPress={handleUserPromptKeyPress}
                     placeholder="e.g., Write a post about the future of AI in my industry..."
-                    className="w-full h-12 px-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    onKeyPress={(e) => e.key === 'Enter' && !processing && handleGeneratePost()}
+                    className="w-full min-h-[48px] max-h-[200px] px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none overflow-y-auto"
+                    rows="1"
                   />
                 </div>
                 <button
@@ -499,21 +665,6 @@ function DashboardContent() {
         isOpen={showPDFUploader} 
         onClose={() => setShowPDFUploader(false)} 
       />
-
-      {/* Processing Overlay */}
-      {processing && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-8 rounded-lg shadow-lg">
-            <div className="flex items-center">
-              <Loader className="animate-spin h-8 w-8 text-blue-500 mr-4" />
-              <div>
-                <h3 className="text-lg font-semibold">Working on your {selectedModality} content...</h3>
-                <p className="text-gray-600">Please wait while we create your content.</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

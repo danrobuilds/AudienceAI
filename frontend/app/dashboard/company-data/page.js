@@ -173,12 +173,12 @@ const CompanyDataPage = () => {
                           <TrendingUp className="h-5 w-5 text-blue-500 mt-3 flex-shrink-0" />
                           <div className="flex-1">
                             <label className="block font-medium text-gray-900 mb-1">Industry</label>
-                            <input
-                              type="text"
+                            <textarea
+                              ref={(el) => textareaRefs.current['industry'] = el}
                               value={editedData.industry || ''}
                               onChange={(e) => handleFieldChange('industry', e.target.value)}
                               placeholder="Enter industry"
-                              className="w-full p-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                              className="w-full p-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none min-h-[80px]"
                             />
                           </div>
                         </div>

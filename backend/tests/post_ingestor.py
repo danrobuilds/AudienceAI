@@ -10,7 +10,7 @@ from services.supabase_service import supabase
 # Determine the absolute path to the directory where this script is located
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # The CSV file is in the same directory as this script
-CSV_PATH = os.path.join(SCRIPT_DIR, "influencers_data_filtered.csv")
+CSV_PATH = os.path.join(SCRIPT_DIR, "blog_data.csv")
 
 # Load the CSV data
 df = pd.read_csv(CSV_PATH)
@@ -60,7 +60,7 @@ for i, row in df.iterrows():
     
     # Prepare post data for Supabase
     post_data = {
-        "type": "linkedin",
+        "type": "blog",
         "content": row["content"] if pd.notna(row["content"]) else "",
         "embedding": embedding_vector,
         "target_audience": row["target_audience"] if pd.notna(row["target_audience"]) else "",

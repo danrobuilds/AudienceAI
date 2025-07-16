@@ -8,6 +8,7 @@ from .web_search import web_search
 from .image_web_search import image_web_search
 from .generate_image import generate_image
 from .create_diagram import create_diagram
+from .search_blog_posts import search_blog_posts
 
 # Tool Definitions (kept the same for compatibility)
 search_document_library_mcp_tool_def = {
@@ -27,6 +28,23 @@ search_document_library_mcp_tool_def = {
     "strict": True
 }
 
+search_blog_posts_mcp_tool_def = {
+    "name": "search_blog_posts",
+    "description": "Search for successful blog posts using an embedding-based retriever. Use this to find examples of successful content structures that match the content type and themes you're creating.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "A structured content brief of at least 50 words: The main message/key points you want to communicate, The content type - a detailed description of the structure and format of the post you want to create, The intended tone/style, The target audience context. "
+            }
+        },
+        "required": ["query"],
+        "additionalProperties": False
+    },
+    "strict": True
+}
+
 search_linkedin_posts_mcp_tool_def = {
     "name": "search_linkedin_posts",
     "description": "Search for successful LinkedIn posts using an embedding-based retriever. Use this to find examples of successful posts that match the content type and themes you're creating.",
@@ -35,7 +53,7 @@ search_linkedin_posts_mcp_tool_def = {
         "properties": {
             "query": {
                 "type": "string",
-                "description": "A structured content brief that captures: The main message/key points you want to communicate, The content type - a detailed description of the structure and format of the post you want to create, The intended tone/style, The target audience context. "
+                "description": "A structured content brief of at least 50 words: The main message/key points you want to communicate, The content type - a detailed description of the structure and format of the post you want to create, The intended tone/style, The target audience context. "
             }
         },
         "required": ["query"],
@@ -52,7 +70,7 @@ web_search_mcp_tool_def = {
         "properties": {
             "query": {
                 "type": "string",
-                "description": "The search query. Include the following: What do you want to find or understand? Where should the system look? What type of information and analytical depth should the system apply? How should the response be structured or returned?"
+                "description": "A structured content brief of at least 50 words containing: What SPECIFIC information do you want to find or understand? If about a specific company or person, what is the name? Where should the system look? What type of information and analytical depth should the system apply? How should the response be structured or returned?"
             }
         },
         "required": ["query"],
@@ -134,7 +152,8 @@ async def call_mcp_tools(llm_response, async_log_callback=None, tenant_id: str =
         "web_search": web_search,
         "image_web_search": image_web_search,
         "generate_image": generate_image,
-        "create_diagram": create_diagram
+        "create_diagram": create_diagram,
+        "search_blog_posts": search_blog_posts
     }
 
     tool_messages = []
@@ -236,6 +255,15 @@ def format_output_for_log(tool_name: str, tool_output_content: dict) -> str:
         lines.append("Successfully found viral posts")
         lines.append("")  # Add consistent spacing
         for post in tool_output_content['viral_posts']:
+            lines.append(f"Post Content: {post['content'][:50]}...")
+            lines.append(f"Similarity Score: {post['similarity_score']}")
+            lines.append("")
+        return "\n".join(lines)
+    
+    if tool_name == "search_blog_posts":
+        lines.append("Successfully found blog posts")
+        lines.append("")  # Add consistent spacing
+        for post in tool_output_content['blog_posts']:
             lines.append(f"Post Content: {post['content'][:50]}...")
             lines.append(f"Similarity Score: {post['similarity_score']}")
             lines.append("")

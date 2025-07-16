@@ -110,6 +110,40 @@ export const userQueriesAPI = {
   },
 
   /**
+   * Handle follow-up query to modify existing content
+   * @param {string} followupQuery - The follow-up request to modify content
+   * @param {object} existingContent - The existing generated content to modify
+   * @param {string} modality - Content type: 'linkedin', 'twitter', 'instagram', 'blog'
+   */
+  async followupQuery(followupQuery, existingContent, modality = 'linkedin') {
+    try {
+      const tenantId = getTenantId();
+      
+      if (!tenantId) {
+        throw new Error('No tenant ID found. Please sign in again.');
+      }
+      
+      console.log("Sending follow-up request...");
+      const response = await apiClient.post('/queries/followup', {
+        followup_query: followupQuery,
+        existing_content: existingContent,
+        modality: modality,
+        tenant_id: tenantId
+      });
+      
+      console.log("Follow-up response received:", response.data);
+      return response.data;
+    } catch (error) {
+      console.error("Follow-up query failed:", error);
+      throw new Error(
+        error.response?.data?.message || 
+        error.message || 
+        'Failed to process follow-up query'
+      );
+    }
+  },
+
+  /**
    * Check user queries service status
    */
   async checkStatus() {
