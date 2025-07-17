@@ -52,12 +52,7 @@ async def create_media_for_post(post_content: str, modality: str, llm, async_log
             if generated_images:
                 await _log(f"Generated {len(generated_images)} visual elements for the {modality} post")
                 for img in generated_images:
-                    if 'style' in img:
-                        await _log(f"Image: {img['filename']} ({img['size']}, {img['style']} style)")
-                    elif 'diagram_type' in img:
-                        await _log(f"Diagram: {img['filename']} ({img['size']}, {img['diagram_type']} type)")
-                    else:
-                        await _log(f"Visual: {img['filename']} ({img['size']})")
+                    await _log(f"Visual: {img['filename']} ({img['size']})")
         
         await _log(f"{modality.title()} visual content creation complete.")
         return generated_images

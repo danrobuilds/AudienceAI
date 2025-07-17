@@ -33,7 +33,7 @@ def search_linkedin_posts(query: str) -> dict:
             return {"error": "No relevant viral posts found for this topic using the vector database."}
         
         viral_posts = []
-        for i, doc in enumerate(response.data[:3]):  # Limit to top 3 for conciseness
+        for i, doc in enumerate(response.data[:1]):  # Limit to top 3 for conciseness
             content = doc.get('content', 'No content available')
             similarity = doc.get('similarity', 0)
             target_audience = doc.get('target_audience', 'No target audience available')

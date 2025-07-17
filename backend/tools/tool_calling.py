@@ -144,8 +144,15 @@ create_diagram_mcp_tool_def = {
 # -------------------------- DIRECT TOOL CALLING LOGIC ------------------------------------------------------------
 
 async def call_mcp_tools(llm_response, async_log_callback=None, tenant_id: str = ""):
+    """
+    Run all requested tool calls concurrently and return formatted results.
+    This streamlined version removes verbose logging and excessive error handling.
+    """
 
-    # Map tool names to functions
+    if not llm_response.tool_calls:
+        return [], []
+
+    # Map tool names to callables
     tool_function_map = {
         "search_document_library": search_document_library,
         "search_linkedin_posts": search_linkedin_posts,
@@ -153,88 +160,55 @@ async def call_mcp_tools(llm_response, async_log_callback=None, tenant_id: str =
         "image_web_search": image_web_search,
         "generate_image": generate_image,
         "create_diagram": create_diagram,
-        "search_blog_posts": search_blog_posts
+        "search_blog_posts": search_blog_posts,
     }
 
-    tool_messages = []
-    generated_images = []  # Track generated images separately
+    generated_images = []
 
-    async def _log(message):
-        if async_log_callback:
-            await asyncio.wait_for(async_log_callback(message), timeout=5.0)
-        else:
-            print(f"[LOG] {message}") 
-
-    if not llm_response.tool_calls:
-        return tool_messages, generated_images
-        
-    await _log(f"\nLLM decided to use {len(llm_response.tool_calls)} tool(s): {[tc.get('name', 'unknown') if isinstance(tc, dict) else getattr(tc, 'name', 'unknown') for tc in llm_response.tool_calls]}")
-    
-    for tool_call in llm_response.tool_calls:
-        tool_args = tool_call["args"]
-        tool_output_content = "" 
+    async def run_tool(tool_call):
         tool_name = tool_call["name"]
+        args = tool_call["args"]
+        func = tool_function_map.get(tool_name)
 
-        await _log(f"Calling tool '{tool_name}' with args: {tool_args}")
+        if func is None:
+            return ToolMessage(content=f"Unknown tool '{tool_name}'", tool_call_id=tool_call["id"])
+
+        # Build kwargs based on tool signature
+        if tool_name == "generate_image":
+            kwargs = {
+                "prompt": args["prompt"],
+                "style": args.get("style", "professional"),
+                "aspect_ratio": args.get("aspect_ratio", "16:9"),
+            }
+        elif tool_name == "create_diagram":
+            kwargs = {"mermaid_code": args["mermaid_code"]}
+        elif tool_name == "search_document_library":
+            kwargs = {"query": args["query"], "tenant_id": tenant_id}
+        else:
+            kwargs = {"query": args["query"]}
 
         try:
-            # Get the function for this tool
-            tool_function = tool_function_map.get(tool_name)
-            
-            if not tool_function:
-                tool_output_content = f"Error: Unknown tool '{tool_name}'"
-                await _log(tool_output_content)
+            if asyncio.iscoroutinefunction(func):
+                output = await func(**kwargs)
             else:
-                if tool_name == "generate_image":
-                    # Handle the three-argument case
-                    tool_output_content = tool_function(
-                        prompt=tool_args["prompt"],
-                        style=tool_args.get("style", "professional"),
-                        aspect_ratio=tool_args.get("aspect_ratio", "16:9")
-                    )
-                    
-                    # If image generation was successful, preserve the complete image object
-                    if isinstance(tool_output_content, dict) and "base64_data" in tool_output_content:
-                        generated_images.append(tool_output_content)
-                        await _log(f"Image generated and stored: {tool_output_content['filename']}")
-                        
-                elif tool_name == "create_diagram":
-                    # Handle the diagram creation case
-                    tool_output_content = tool_function(
-                        mermaid_code=tool_args["mermaid_code"]
-                    )
-                    
-                    # If diagram creation was successful, preserve the complete diagram object
-                    if isinstance(tool_output_content, dict) and "base64_data" in tool_output_content:
-                        generated_images.append(tool_output_content)
-                        await _log(f"Diagram generated and stored: {tool_output_content['filename']}")
-                        
-                elif tool_name == "search_document_library":
-                    # Handle search_document_library with tenant_id
-                    tool_output_content = tool_function(
-                        query=tool_args["query"],
-                        tenant_id=tenant_id
-                    )
-                else:
-                    # Handle other single-argument tools
-                    tool_output_content = tool_function(query=tool_args["query"])
-            
-            # Format tool results for user visibility
-            if isinstance(tool_output_content, dict):
-                formatted_output = format_output_for_log(tool_name, tool_output_content)
-                await _log(f"Tool '{tool_name}' results: {formatted_output}")
-                tool_output_content = format_output_for_llm(tool_name, tool_output_content)
-
+                output = await asyncio.to_thread(func, **kwargs)
         except Exception as e:
-            await _log(f"Error during tool '{tool_name}' call: {e}")
-            tool_output_content = f"The '{tool_name}' tool failed. Please proceed with available information."
-        
-        tool_messages.append(ToolMessage(content=tool_output_content, tool_call_id=tool_call["id"]))
-    
-    # Add clear section boundary after all tools are completed
-    await _log(f"\nProcessing tool results...")
-    
-    return tool_messages, generated_images
+            return ToolMessage(content=f"Error running '{tool_name}': {e}", tool_call_id=tool_call["id"])
+
+        if isinstance(output, dict) and "base64_data" in output:
+            generated_images.append(output)
+
+        formatted = format_output_for_llm(tool_name, output) if isinstance(output, dict) else str(output)
+        log_output = format_output_for_log(tool_name, output) if isinstance(output, dict) else str(output)
+        if async_log_callback:
+            await async_log_callback(log_output)
+
+        return ToolMessage(content=formatted, tool_call_id=tool_call["id"])
+
+    # Execute all tools in parallel
+    tool_messages = await asyncio.gather(*(run_tool(tc) for tc in llm_response.tool_calls))
+
+    return list(tool_messages), generated_images
 
 
 def format_output_for_log(tool_name: str, tool_output_content: dict) -> str:

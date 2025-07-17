@@ -351,24 +351,37 @@ function DashboardContent() {
                   <div>
                     <h2 className="text-lg font-semibold mb-4">Details</h2>
                     
-                    <div className="space-y-4">
+                    <div className="">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          My Task
-                        </label>
                         <textarea
                           value={currentGeneration.userPrompt}
                           readOnly
-                          className="w-full h-20 p-3 border border-gray-200 rounded-lg bg-gray-50 text-gray-700"
+                          className="w-full rounded-lg text-gray-700 resize-none focus:outline-none"
                         />
                       </div>
 
+                      <div className="flex items-center space-x-4">
+                        <div className="flex items-center">
+                          <span className="inline-flex items-center px-3 py-1 text-sm bg-blue-100 text-blue-800 rounded-full">
+                            {modalityOptions.find(m => m.id === currentGeneration.selectedModality)?.emoji}
+                            {modalityOptions.find(m => m.id === currentGeneration.selectedModality)?.label}
+                          </span>
+                        </div>
+                        <div className="flex items-center">
+                          <label className="text-sm font-medium text-gray-700 mr-2">Created:</label>
+                          <span className="text-sm text-gray-600">
+                            {new Date(currentGeneration.timestamp).toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Spacer to push platform info to align with bottom of content */}
+                      <div className="flex-1"></div>
+                      <div className="space-y-4"></div>
+                      
                       {/* Modify Content Section */}
                       {!currentGeneration.isLoading && (
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Modify Content
-                          </label>
+                        <div className="mt-8">
                           <div className="flex items-start gap-2">
                             <textarea
                               ref={followupPromptRef}
@@ -400,7 +413,7 @@ function DashboardContent() {
 
                       {/* Inline Loading Indicators */}
                       {processing && processingSteps.length > 0 && (
-                        <div className="border border-blue-200 rounded-lg p-4 bg-blue-50">
+                        <div className="border border-blue-200 rounded-lg p-4 bg-blue-50 mt-8">
                           <div className="flex items-center gap-2 mb-3">
                             <span className="text-sm font-medium text-blue-900">
                               {isInitialGeneration ? 'Creating your content...' : 'Updating your content...'}
@@ -431,29 +444,10 @@ function DashboardContent() {
                     </div>
                   </div>
 
-                  {/* Spacer to push platform info to align with bottom of content */}
-                  <div className="flex-1"></div>
+                  
 
                   {/* Platform, Created, Logs, and Sources - positioned at bottom */}
                   <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Platform
-                      </label>
-                      <span className="inline-flex items-center px-3 py-1 text-sm bg-blue-100 text-blue-800 rounded-full">
-                        {modalityOptions.find(m => m.id === currentGeneration.selectedModality)?.emoji}
-                        {modalityOptions.find(m => m.id === currentGeneration.selectedModality)?.label}
-                      </span>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Created
-                      </label>
-                      <div className="text-sm text-gray-600">
-                        {new Date(currentGeneration.timestamp).toLocaleString()}
-                      </div>
-                    </div>
 
                     {/* Logs Dropdown */}
                     {currentGeneration.logs && currentGeneration.logs.length > 0 && (
@@ -499,7 +493,7 @@ function DashboardContent() {
                       value={currentGeneration.generatedPost}
                       onChange={handlePostChange}
                       placeholder="Generated post content..."
-                      className="w-full min-h-[400px] p-4 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                      className="w-full min-h-[400px] p-4 resize-none focus:outline-none"
                     />
                   )}
 

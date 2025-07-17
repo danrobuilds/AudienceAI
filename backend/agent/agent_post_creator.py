@@ -31,6 +31,8 @@ async def create_viral_post(user_prompt_text: str, gathered_info: str, llm, asyn
 
             {company_context}
 
+            You are a social media marketing expert who makes content for this company's social media accounts.
+
             """),
         
         HumanMessage(content=f"""
@@ -39,72 +41,56 @@ async def create_viral_post(user_prompt_text: str, gathered_info: str, llm, asyn
 
             Gathered Information: {gathered_info}
 
-            Draw from relevant examples of successful posts. Pick the most relevant example and copy the format exactly. This will lay the groundwork for creating the text and image for marketing content that satisfies the user's original request.
+            Find an example of a successful post and copy the format exactly. This will lay the groundwork for creating the text and image for marketing content that satisfies the user's original request.
             
             After gathering examples, I'll ask you to create the final structured content.
 
             """)
     ]
     
-    try:
-        await _log(f"Invoking LLM for {modality} content research...")
-        response = await asyncio.wait_for(llm_with_tools.ainvoke(messages), timeout=60.0)
-        messages.append(response)
-        
-        tool_call_count = 0
-        
-        # Process tool calls if any
-        if response.tool_calls:
-            tool_call_count = len(response.tool_calls)
-            await _log(f"LLM requesting {tool_call_count} tool calls for {modality} content research")
-            
-            tool_messages, _ = await call_mcp_tools(response, async_log_callback, tenant_id)
-            messages.extend(tool_messages)
-            
-        # Step 2: Use structured output LLM to create final content
-        structured_schema = {
-            "name": "social_media_content",
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "post_content": {
-                        "type": "string",
-                        "description": f"The viral {modality} post content that satisfies the user's original request according to the examples of successful {modality} posts. Post content should complement the image, not be a duplicate of it."
-                    },
-                    "image_description": {
-                        "type": "string", 
-                        "description": f"Detailed description for generating a compelling image for this {modality} post, including the purpose of the image, data, words, and information, type, visual elements, style, composition, colors, and any other relevant details."
-                    }
-                },
-                "required": ["post_content", "image_description"],
-                "additionalProperties": False
-            }
-        }
-        
-        llm_structured = llm.with_structured_output(structured_schema)
-        
-        # Add final instruction for structured output
-        messages.append(HumanMessage(content=f"""
+    # Phase 1 – research
+    response = await llm_with_tools.ainvoke(messages)
+    messages.append(response)
 
-            Now create the final viral {modality} content that satisfies the user's original request exactly using all the information gathered.
-        
-            IMPORTANT: Format the content and image in tandem based on the provided examples of successful {modality} posts. They should complement each other and not be repetitive.
-            The post and image shoudl function as a single unit and NOT be repetitive.
-            """))
-        
-        await _log(f"Invoking LLM for structured {modality} content creation...")
-        structured_response = await asyncio.wait_for(llm_structured.ainvoke(messages), timeout=120.0)
-        
-        await _log(f"{modality.title()} content creation complete. Used {tool_call_count} tool calls. Image description: {structured_response['image_description']}")
-        
-        return structured_response
-        
-    except Exception as e:
-        await _log(f"Error during {modality} content creation: {e}")
-        return {
-            "post_content": f"{modality.title()} content creation encountered an error: {e}",
-            "image_description": f"Professional image complementing this {modality} post"
+    # Handle any tool calls returned from the first pass
+    if response.tool_calls:
+        tool_messages, _ = await call_mcp_tools(response, async_log_callback, tenant_id)
+        messages.extend(tool_messages)
+
+    # Phase 2 – generate structured content
+    structured_schema = {
+        "name": "social_media_content",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "post_content": {
+                    "type": "string",
+                    "description": f"The viral {modality} post content that satisfies the user's original request according to the examples of successful {modality} posts. Post content should complement the image, not be a duplicate of it."
+                },
+                "image_description": {
+                    "type": "string", 
+                    "description": f"Detailed description for generating a compelling image for this {modality} post, including the purpose of the image, data, words, and information, type, visual elements, style, composition, colors, and any other relevant details."
+                }
+            },
+            "required": ["post_content", "image_description"],
+            "additionalProperties": False
         }
+    }
+
+    llm_structured = llm.with_structured_output(structured_schema)
+
+    # Add final instruction for structured output
+    messages.append(HumanMessage(content=f"""
+
+        Now create the final viral {modality} content that satisfies the user's original request exactly using all the information gathered.
+    
+        IMPORTANT: Format the content and image in tandem based on the provided examples of successful {modality} posts. They should complement each other and not be repetitive.
+        """))
+
+    structured_response = await llm_structured.ainvoke(messages)
+
+    await _log(f"{modality.title()} content creation complete.")
+    return structured_response
 
 def get_tools_for_modality(modality: str):
     """
